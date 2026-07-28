@@ -1,0 +1,77 @@
+{
+  "_comment": "Source-of-truth mapping for Cloudflare AI Gateway dynamic-route model tiers. Apps call a TIER name via model:\"dynamic/<tier>\", never a raw model id. The free-tier provider is PRIMARY: its key is stored in the gateway as a BYOK provider key, so those calls bill the provider's own free quota instead of Cloudflare unified-billing credits, and fail over to the paid provider automatically when the free tier 429s. No API key is ever sent in a request — runtime auth is the cf-aig-authorization header only.",
+
+  "gateway": "tiers",
+  "gateway_base_url": "https://gateway.ai.cloudflare.com/v1/{account_id}/tiers",
+  "gateway_notes": "authentication=true AND store_id shared with the account's default gateway are both required. That store binding is what enables keyless Unified Billing on a NON-default gateway. Read your default gateway's store_id from GET /accounts/{account_id}/ai-gateway/gateways/default and reuse the value here.",
+
+  "invoke": {
+    "endpoint": "{gateway_base_url}/compat/chat/completions",
+    "auth_header": "cf-aig-authorization: Bearer $CF_AIG_TOKEN",
+    "body_model_field": "dynamic/<tier>",
+    "optional_attribution_header": "cf-aig-metadata: {\"project\":\"<app>\"}",
+    "which_model_answered": "read the cf-aig-model response header"
+  },
+
+  "tiers": {
+    "low": {
+      "purpose": "cheap/fast — classify, tag, extract, spam-score",
+      "primary": {
+        "provider": "google-ai-studio",
+        "model": "gemini-3.6-flash",
+        "billing": "BYOK free tier"
+      },
+      "fallback": {
+        "provider": "anthropic",
+        "model": "claude-haiku-4-5-20251001",
+        "billing": "unified (paid)"
+      }
+    },
+    "high": {
+      "purpose": "flagship reasoning / structured extraction",
+      "primary": {
+        "provider": "google-ai-studio",
+        "model": "gemini-3.1-pro-preview",
+        "billing": "BYOK free tier"
+      },
+      "fallback": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-5",
+        "billing": "unified (paid)"
+      }
+    },
+    "code": {
+      "purpose": "OPTIONAL third tier — top-end code/agentic work, quality over cost",
+      "primary": {
+        "provider": "anthropic",
+        "model": "claude-opus-4-8",
+        "billing": "unified (paid)"
+      },
+      "fallback": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-5",
+        "billing": "unified (paid)"
+      }
+    }
+  },
+
+  "notes": {
+    "azure": "Azure OpenAI CANNOT be a route step. The dynamic-route model element has no field for Azure's resource name / api-version / BYOK key, so an azure-openai step 500s at runtime. Reach Azure via the direct provider path instead. Verified by scripts/test-routing.sh step 5.",
+    "code_tier": "The `code` tier deliberately falls back to a second model from the SAME provider — no cross-provider top-end code model was verified equivalent. Reduced provider diversity is an accepted trade-off there.",
+    "tier_count": "Two tiers (low + high) cover essentially every user-facing app path. Add `code` only if you genuinely need frontier reasoning in production."
+  },
+
+  "verification": {
+    "unified_models_confirmed_200": [
+      "anthropic/claude-haiku-4-5-20251001",
+      "anthropic/claude-sonnet-5",
+      "anthropic/claude-opus-4-8",
+      "openai/gpt-4o-mini",
+      "openai/gpt-4o",
+      "openai/gpt-4.1-mini",
+      "google-ai-studio/gemini-2.5-flash",
+      "google-ai-studio/gemini-2.5-pro"
+    ],
+    "failover_proof": "A throwaway route with a deliberately bogus primary model fell back to the secondary and returned HTTP 200, while a bad-only control route (no fallback) errored. Route deleted after the test. Reproduce with scripts/test-routing.sh."
+  }
+}
