@@ -1,10 +1,9 @@
 {
-  "_comment": "Source-of-truth mapping for Cloudflare AI Gateway dynamic-route model tiers. Apps call a TIER name via model:\"dynamic/<tier>\", never a raw model id. The free-tier provider is PRIMARY: its key is stored in the gateway as a BYOK provider key, so those calls bill the provider's own free quota instead of Cloudflare unified-billing credits, and fail over to the paid provider automatically when the free tier 429s. No API key is ever sent in a request — runtime auth is the cf-aig-authorization header only.",
-
+  "_comment": "Source-of-truth mapping for Cloudflare AI Gateway dynamic-route model tiers. Apps call a TIER name via model:\"dynamic/<tier>\", never a raw model id. Each tier is a primary model with automatic failover to a second provider. No API key is ever sent in a request — runtime auth is the cf-aig-authorization header only.",
+  "_warning_byok_is_not_free": "Storing a provider key as gateway BYOK moves that spend from Cloudflare unified credits onto YOUR provider account. It does NOT grant you the provider's free tier. For Google AI Studio specifically: if the key's Google Cloud project has billing enabled, the key is on the PAID tier and free-tier quota does not apply at all — a stored key bills full price with no 429 to warn you. Verify with `gcloud billing projects describe <project>` (or the Cloud Billing API) BEFORE treating any BYOK step as free. Do not rely on the gateway's `cost` field to catch this: it is a list-price estimate that ignores hidden reasoning tokens and undercounted real output by ~8x in our measurements.",
   "gateway": "tiers",
   "gateway_base_url": "https://gateway.ai.cloudflare.com/v1/{account_id}/tiers",
   "gateway_notes": "authentication=true AND store_id shared with the account's default gateway are both required. That store binding is what enables keyless Unified Billing on a NON-default gateway. Read your default gateway's store_id from GET /accounts/{account_id}/ai-gateway/gateways/default and reuse the value here.",
-
   "invoke": {
     "endpoint": "{gateway_base_url}/compat/chat/completions",
     "auth_header": "cf-aig-authorization: Bearer $CF_AIG_TOKEN",
@@ -12,14 +11,13 @@
     "optional_attribution_header": "cf-aig-metadata: {\"project\":\"<app>\"}",
     "which_model_answered": "read the cf-aig-model response header"
   },
-
   "tiers": {
     "low": {
       "purpose": "cheap/fast — classify, tag, extract, spam-score",
       "primary": {
         "provider": "google-ai-studio",
         "model": "gemini-3.6-flash",
-        "billing": "BYOK free tier"
+        "billing": "BYOK — bills YOUR provider account at PAID rates unless you have verified otherwise; see _warning_byok_is_not_free"
       },
       "fallback": {
         "provider": "anthropic",
@@ -32,7 +30,7 @@
       "primary": {
         "provider": "google-ai-studio",
         "model": "gemini-3.1-pro-preview",
-        "billing": "BYOK free tier"
+        "billing": "BYOK — bills YOUR provider account at PAID rates unless you have verified otherwise; see _warning_byok_is_not_free"
       },
       "fallback": {
         "provider": "anthropic",
@@ -54,24 +52,31 @@
       }
     }
   },
-
   "notes": {
-    "azure": "Azure OpenAI CANNOT be a route step. The dynamic-route model element has no field for Azure's resource name / api-version / BYOK key, so an azure-openai step 500s at runtime. Reach Azure via the direct provider path instead. Verified by scripts/test-routing.sh step 5.",
+    "azure": "Azure OpenAI CANNOT be a route step. The dynamic-route model element has no field for Azure's resource name / api-version, so an azure-openai step never reaches the provider. Re-verified 2026-07-30: such a route returns 200 but is ALWAYS answered by the fallback, and the Azure step produces NO gateway log entry at all. Storing an azure-openai BYOK secret does not fix it. The failure is graceful — outputs.fallback fires normally — so an Azure step is harmless, just useless. Consequence: an 'Azure-first / cheapest-credits-first' policy cannot be expressed as a dynamic route; it has to live in app code.",
+    "invoking_dynamic_routes": "dynamic/<tier> resolves ONLY on the gateway that owns the route. Pointing your base URL at a different gateway (e.g. 'default') returns HTTP 400 internalCode 2005 'Failed to get response from provider' with NO log entry — which is indistinguishable from a genuinely broken tier and will send you debugging the wrong thing. Always invoke at {gateway_base_url}/compat/chat/completions for the gateway that holds the routes.",
     "code_tier": "The `code` tier deliberately falls back to a second model from the SAME provider — no cross-provider top-end code model was verified equivalent. Reduced provider diversity is an accepted trade-off there.",
     "tier_count": "Two tiers (low + high) cover essentially every user-facing app path. Add `code` only if you genuinely need frontier reasoning in production."
   },
-
   "verification": {
-    "unified_models_confirmed_200": [
-      "anthropic/claude-haiku-4-5-20251001",
-      "anthropic/claude-sonnet-5",
-      "anthropic/claude-opus-4-8",
-      "openai/gpt-4o-mini",
-      "openai/gpt-4o",
-      "openai/gpt-4.1-mini",
-      "google-ai-studio/gemini-2.5-flash",
-      "google-ai-studio/gemini-2.5-pro"
-    ],
-    "failover_proof": "A throwaway route with a deliberately bogus primary model fell back to the secondary and returned HTTP 200, while a bad-only control route (no fallback) errored. Route deleted after the test. Reproduce with scripts/test-routing.sh."
+    "failover_proof": "A throwaway route with a deliberately bogus primary model fell back to the secondary and returned HTTP 200, while a bad-only control route (no fallback) errored. Route deleted after the test. Reproduce with scripts/test-routing.sh.",
+    "_what_this_is": "COMPATIBILITY PROBE, NOT A RECOMMENDED-MODEL LIST. Records which ids returned 200 through the compat endpoint on the date in the key name. Do NOT pick a fallback model because it appears here — ids age fast and this is not curated for quality. Check the date, then re-probe before choosing.",
+    "route_step_model_constraint": "Route steps MUST accept `max_tokens`. Verified 2026-07-30: every gpt-5.x model (gpt-5.4, gpt-5.1, gpt-5-mini) returns HTTP 400 \"Unsupported parameter: 'max_tokens' is not supported with this model\" — they require max_completion_tokens, which the compat endpoint does not translate. So a newer model is not automatically a usable fallback; this is a wire-format constraint, not a quality judgement.",
+    "compat_probe": {
+      "_what_this_is": "A COMPATIBILITY PROBE, NOT A RECOMMENDED-MODEL LIST. It records which model ids returned 200 through the compat endpoint when last run. Do NOT pick a fallback because it appears here — model ids age fast and this is not curated for quality. Re-probe before choosing.",
+      "accepts_max_tokens": [
+        "anthropic/claude-haiku-4-5-20251001",
+        "anthropic/claude-sonnet-5",
+        "anthropic/claude-opus-4-8",
+        "openai/gpt-4.1",
+        "openai/gpt-4.1-mini",
+        "groq/llama-3.3-70b-versatile"
+      ],
+      "rejects_max_tokens": [
+        "openai/gpt-5.4",
+        "openai/gpt-5.1",
+        "openai/gpt-5-mini"
+      ]
+    }
   }
 }

@@ -47,6 +47,22 @@ start ──▶ primary: google-ai-studio/gemini-*   (BYOK — bills YOUR free q
 
 The primary is your own Google AI Studio key, stored **inside the gateway** as a BYOK provider key. Calls through it bill against Google's free tier, not against Cloudflare credits. When the free tier throttles you — `429` — the route silently steps to a paid Anthropic model and the request still returns `200`. Your user never sees a failure; you just paid a few cents for that one request instead of zero.
 
+> ### ⚠️ Hard precondition: the key's project must have billing DISABLED
+>
+> This entire arbitrage rests on one fact that is easy to get wrong: **an AI Studio key is only free while its Google Cloud project is not linked to a billing account.** Link billing to that project — for any reason, including for an unrelated API — and the key silently moves to the **paid tier**, where free-tier quota does not apply *at all*.
+>
+> There is no signal when this happens. You never get the `429` the design depends on, so the fallback never fires, and every request bills at full price while looking perfectly healthy.
+>
+> Two traps make it worse:
+> - **The gateway's `cost` field will not save you.** It's a list-price estimate that ignores hidden reasoning tokens, and can understate a real bill several-fold — in one measured sample, 113K *reported* output tokens concealed 857K *unreported* thinking tokens.
+> - **Enabling billing is often not your decision.** Any Google API that requires a billing account (Maps, Places, Vision, Speech) will pull the project onto paid tier, taking your "free" Gemini key with it. Keep the AI Studio key in a project that has *nothing else* in it.
+>
+> Verify before you trust it, and re-verify after any Google Cloud change:
+> ```bash
+> gcloud billing projects describe <project-id>   # billingEnabled must be false
+> ```
+> If it says `true`, this pattern is costing you money right now. Either move the key to an unbilled project or make the paid provider the primary and delete the Google step.
+
 Net effect: **you pay only for the overflow.** Steady-state cost tracks the *excess* over the free quota, not total volume. Meanwhile the fallback gives you genuine cross-provider redundancy — a Google outage degrades your bill, not your uptime.
 
 Critically, **no API key ever leaves your app**. The client sends only a gateway token. Provider credentials live in the gateway's key store.
@@ -125,7 +141,15 @@ curl -s -X POST "$REST/gateways" \
 
 ### Step 3 — add the free provider key (BYOK)
 
-Add your Google AI Studio key to the gateway's key store, scoped to this gateway and the `google-ai-studio` provider. This is what makes the primary step bill Google's free tier instead of Cloudflare credits. (Easiest in the dashboard: *AI Gateway → tiers → Provider Keys*.)
+Add your Google AI Studio key to the gateway's key store, scoped to this gateway and the `google-ai-studio` provider. This is what makes the primary step bill your own Google account instead of Cloudflare credits. (Easiest in the dashboard: *AI Gateway → tiers → Provider Keys*.)
+
+**Check this first, or skip this step entirely:**
+
+```bash
+gcloud billing projects describe <the-key's-project-id>   # billingEnabled MUST be false
+```
+
+BYOK moves spend onto your Google account — it does **not** grant you a free tier. If `billingEnabled` is `true`, the key is on the paid tier, free quota does not apply, and adding it here means paying full price for every primary call with no `429` to warn you. See the precondition callout above.
 
 ### Step 4 — create one route per tier
 
