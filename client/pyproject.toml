@@ -1,0 +1,16 @@
+[project]
+name = "aigw"
+version = "1.0.0"
+description = "Cloudflare AI Gateway tier client — ask for a capability tier, never a model."
+requires-python = ">=3.9"
+dependencies = ["httpx"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["aigw"]
+
+[tool.setuptools.package-data]
+"*" = ["../tiers.json"]

@@ -1,0 +1,166 @@
+{
+  "_what_this_is": "Single source of truth for how every app reaches an LLM. Apps ask for a CAPABILITY TIER, never a model id. All text and embedding traffic goes to the `tiers` gateway on Cloudflare AI Gateway via the UNIVERSAL ENDPOINT, which takes an ordered array of provider attempts and fails over automatically. No provider API key ever appears in app code — every provider key is stored in the gateway, so requests carry only `cf-aig-authorization`.",
+  "_policy": "Azure first, always. Microsoft-for-Startups credits are free until ~2026-09-21, so every tier leads with Azure and falls back to a DIFFERENT AZURE MODEL before it will consider anything else. Azure throttling is per-deployment, so a second Azure model rescues the common failure (429/TPM) at zero cost. Only after Azure is exhausted does a tier reach Google's free tier, and only then Cloudflare unified billing (vendor list price + 5%).",
+  "gateway": "tiers",
+  "endpoint": "https://gateway.ai.cloudflare.com/v1/{account_id}/tiers",
+  "method": "POST",
+  "auth_header": "cf-aig-authorization: Bearer $CF_AIG_TOKEN",
+  "attribution_header": "cf-aig-metadata: {\"project\":\"<app>\"}",
+  "_request_shape": "POST the endpoint with a JSON ARRAY of attempts. Each element is {provider, endpoint, headers, query}. `query` holds the REQUEST BODY (not URL params); anything that must be a URL parameter goes inside the `endpoint` string. The gateway tries elements in order and returns the first success. The response is the WINNING PROVIDER's native shape — use the client helper to normalise it.",
+  "_no_max_tokens": "Never send `max_tokens`. Every gpt-5.x model rejects it (400 'Unsupported parameter') because they expect `max_completion_tokens`, and the compat layer does not translate. Omitting the parameter entirely works on every provider here and is the only form that survives failover across providers with different wire formats.",
+  "azure_resource": "kristiferszabo-0182-resource",
+  "azure_api_version": "2024-10-21",
+  "tiers": {
+    "low": {
+      "purpose": "cheap/fast — classify, tag, extract, spam-score, short generation",
+      "chain": [
+        {
+          "provider": "azure-openai",
+          "model": "gpt-5-mini",
+          "cost": "free (MS credits)"
+        },
+        {
+          "provider": "azure-openai",
+          "model": "gpt-5.4",
+          "cost": "free (MS credits)"
+        },
+        {
+          "provider": "google-ai-studio",
+          "model": "gemini-3.6-flash",
+          "cost": "free tier"
+        },
+        {
+          "provider": "anthropic",
+          "model": "claude-haiku-4-5-20251001",
+          "cost": "unified (paid)"
+        }
+      ]
+    },
+    "high": {
+      "purpose": "reasoning, structured extraction, quality generation",
+      "chain": [
+        {
+          "provider": "azure-openai",
+          "model": "gpt-5.4",
+          "cost": "free (MS credits)"
+        },
+        {
+          "provider": "azure-openai",
+          "model": "gpt-5-mini",
+          "cost": "free (MS credits)"
+        },
+        {
+          "provider": "google-ai-studio",
+          "model": "gemini-3.1-pro-preview",
+          "cost": "free tier"
+        },
+        {
+          "provider": "anthropic",
+          "model": "claude-sonnet-5",
+          "cost": "unified (paid)"
+        }
+      ]
+    },
+    "offload": {
+      "purpose": "bulk / deterministic / dev work — mass codemods, batch analysis, large JSON. AZURE ONLY: this lane must never cost money, so it fails rather than escalating to a paid provider.",
+      "chain": [
+        {
+          "provider": "azure-openai",
+          "model": "DeepSeek-V4-Pro",
+          "cost": "free (MS credits)"
+        },
+        {
+          "provider": "azure-openai",
+          "model": "gpt-5.4",
+          "cost": "free (MS credits)"
+        },
+        {
+          "provider": "azure-openai",
+          "model": "gpt-5-mini",
+          "cost": "free (MS credits)"
+        }
+      ]
+    },
+    "code": {
+      "purpose": "code-heavy / agentic work. AZURE ONLY.",
+      "chain": [
+        {
+          "provider": "azure-openai",
+          "model": "gpt-5.4",
+          "cost": "free (MS credits)"
+        },
+        {
+          "provider": "azure-openai",
+          "model": "DeepSeek-V4-Pro",
+          "cost": "free (MS credits)"
+        }
+      ]
+    },
+    "embed": {
+      "purpose": "text embeddings — semantic search, similarity, bulk photo/article indexing. 1536 dimensions.",
+      "chain": [
+        {
+          "provider": "azure-openai",
+          "model": "text-embedding-3-small",
+          "path": "embeddings",
+          "cost": "free (MS credits)"
+        }
+      ]
+    }
+  },
+  "specialist": {
+    "_what_this_is": "NOT part of the tier system. Narrow-capability providers on capped free plans, reached directly for the one job each is good at. Do not build general text generation on these — the caps are small and they exist to cover gaps Azure has.",
+    "groq": {
+      "billing": "own free tier (BYOK stored as tiers_groq_default)",
+      "limits": "~1,000 requests/day and only ~8,000 tokens/minute on the large models — far too tight for bulk text",
+      "use_for": {
+        "speech_to_text": [
+          "whisper-large-v3-turbo",
+          "whisper-large-v3"
+        ],
+        "text_to_speech": [
+          "canopylabs/orpheus-v1-english",
+          "canopylabs/orpheus-arabic-saudi"
+        ],
+        "moderation": [
+          "meta-llama/llama-prompt-guard-2-86m",
+          "openai/gpt-oss-safeguard-20b"
+        ]
+      }
+    },
+    "cerebras": {
+      "billing": "own free tier (BYOK stored as tiers_cerebras_default)",
+      "limits": "very generous — 1,000 requests/min, 1M tokens/min, 2B tokens/day",
+      "models": [
+        "gpt-oss-120b",
+        "zai-glm-4.7",
+        "gemma-4-31b"
+      ],
+      "use_for": "reserve capacity for large text batches when Azure is throttled and the job is not latency-critical. No voice, no unique capability beyond speed and headroom."
+    }
+  },
+  "deliberate_exceptions": {
+    "_what_this_is": "The only paths allowed to skip Azure. Each is a considered trade, not an oversight.",
+    "gpt-image-1.5_on_cloudflare": "Customer-facing image generation runs on Cloudflare rather than Azure because it returns ~10s faster, and that latency is user-visible. The same model exists on Azure; the speed is the whole reason.",
+    "gpt-5.4-nano_for_coloring_pages": "helloplaydate coloring-page generation runs on Cloudflare gpt-5.4-nano: it is near-free at that size and refuses far less often on character/copyright prompts than the Azure content filter does."
+  },
+  "google_free_tier": {
+    "how_it_works": "An AI Studio key is on the free tier ONLY while its Google Cloud project has NO billing account attached. Attaching billing to that project — for any reason, including an unrelated API like Maps or Places — silently moves the key to the paid tier, where free quota does not apply and there is no 429 to signal it.",
+    "current_key_project": "gen-lang-client-0291098513 (no billing account, so it cannot be charged)",
+    "verify": "gcloud billing projects describe gen-lang-client-0291098513 — billingEnabled must be false",
+    "caveat": "Free-tier inputs may be used to train Google's models. Acceptable for the fallback position it occupies; reconsider before making it primary for customer content.",
+    "rule": "Never store an AI Studio key from a billing-enabled project as gateway BYOK."
+  },
+  "byok_reality": {
+    "what_byok_does": "Storing a provider key in the gateway moves that spend from Cloudflare unified credits onto YOUR account with that provider, and lets apps call keylessly.",
+    "what_byok_does_not_do": "It does not grant you a free tier. A stored key bills whatever that account bills. Confirm an account is genuinely free-tier before treating a BYOK step as free.",
+    "cost_field_warning": "The gateway's `cost` field is a list-price estimate and ignores hidden reasoning tokens — it can understate real spend by ~8x. Do not use it to verify that something is free."
+  },
+  "stored_keys": {
+    "tiers_azure-openai_default": "Azure AI Foundry",
+    "tiers_google-ai-studio_default": "AI Studio key from the unbilled project",
+    "tiers_groq_default": "Groq free tier",
+    "tiers_cerebras_default": "Cerebras free tier"
+  },
+  "_deployment_capacity": "Azure throttling is per-deployment TPM, set by sku.capacity. gpt-5.4 and DeepSeek-V4-Pro are 500; text-embedding-3-small 120; Kimi-K2.7-Code 100; gpt-5-mini and the image models 50. Kimi-K2.7-Code is deliberately NOT in any chain: at 100 it saturates on real workloads and returns finish_reason 'length' with empty content. Send code work to gpt-5.4. Check with: az cognitiveservices account deployment list --name kristiferszabo-0182-resource --resource-group rg-helloplaydate -o table"
+}
