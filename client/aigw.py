@@ -42,13 +42,22 @@ class TierError(RuntimeError):
     """Every attempt in the chain failed."""
 
 
-def _endpoint() -> str:
-    return f"https://gateway.ai.cloudflare.com/v1/{os.environ['CF_ACCOUNT_ID']}/tiers"
+def _env(*names: str) -> str:
+    for n in names:
+        v = os.environ.get(n)
+        if v:
+            return v
+    raise KeyError(f"set one of: {', '.join(names)}")
 
 
-def _headers(project: str | None) -> dict[str, str]:
+def _endpoint(account_id: str | None = None) -> str:
+    account = account_id or _env("CF_ACCOUNT_ID", "CF_AIG_ACCOUNT_ID")
+    return f"https://gateway.ai.cloudflare.com/v1/{account}/tiers"
+
+
+def _headers(project: str | None, token: str | None = None) -> dict[str, str]:
     h = {
-        "cf-aig-authorization": f"Bearer {os.environ['CF_AIG_TOKEN']}",
+        "cf-aig-authorization": f"Bearer {token or _env('CF_AIG_TOKEN')}",
         "Content-Type": "application/json",
     }
     if project:
@@ -188,8 +197,10 @@ def _extract_text(payload: Any) -> str:
     raise TierError(f"unrecognised response shape: {str(payload)[:200]}")
 
 
-def _post(chain: list[dict[str, Any]], project: str | None, timeout: float) -> Any:
-    r = httpx.post(_endpoint(), headers=_headers(project), json=chain, timeout=timeout)
+def _post(chain: list[dict[str, Any]], project: str | None, timeout: float,
+          account_id: str | None = None, token: str | None = None) -> Any:
+    r = httpx.post(_endpoint(account_id), headers=_headers(project, token),
+                   json=chain, timeout=timeout)
     if r.status_code >= 400:
         raise TierError(f"every attempt failed ({r.status_code}): {r.text[:300]}")
     return r.json()
@@ -204,6 +215,8 @@ def chat(
     temperature: float | None = None,
     project: str | None = None,
     timeout: float = 180.0,
+    account_id: str | None = None,
+    token: str | None = None,
 ) -> Any:
     """Run a prompt through a tier.
 
@@ -213,7 +226,7 @@ def chat(
     chain = build_chain(
         tier, prompt, images=images, json_mode=json_mode, temperature=temperature
     )
-    text = _extract_text(_post(chain, project, timeout))
+    text = _extract_text(_post(chain, project, timeout, account_id, token))
     if not json_mode:
         return text
     try:
@@ -235,9 +248,10 @@ def embed(text: str, *, project: str | None = None, timeout: float = 120.0) -> l
 # --- async equivalents, for apps running inside an event loop -----------------
 
 
-async def _apost(chain: list[dict[str, Any]], project: str | None, timeout: float) -> Any:
+async def _apost(chain: list[dict[str, Any]], project: str | None, timeout: float,
+                 account_id: str | None = None, token: str | None = None) -> Any:
     async with httpx.AsyncClient(timeout=timeout) as c:
-        r = await c.post(_endpoint(), headers=_headers(project), json=chain)
+        r = await c.post(_endpoint(account_id), headers=_headers(project, token), json=chain)
     if r.status_code >= 400:
         raise TierError(f"every attempt failed ({r.status_code}): {r.text[:300]}")
     return r.json()
@@ -252,12 +266,14 @@ async def achat(
     temperature: float | None = None,
     project: str | None = None,
     timeout: float = 180.0,
+    account_id: str | None = None,
+    token: str | None = None,
 ) -> Any:
     """Async :func:`chat`."""
     chain = build_chain(
         tier, prompt, images=images, json_mode=json_mode, temperature=temperature
     )
-    text = _extract_text(await _apost(chain, project, timeout))
+    text = _extract_text(await _apost(chain, project, timeout, account_id, token))
     if not json_mode:
         return text
     try:
