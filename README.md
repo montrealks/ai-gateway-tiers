@@ -2,7 +2,7 @@
 
 **Ask for a capability tier, never a model.** Every app names `low`, `high`, `offload`, `code` or `embed`; this repo owns what those resolve to.
 
-Azure leads every tier — Microsoft-for-Startups credits are free until ~2026-09-21. Each tier falls back to a *second Azure model* before it will consider anything that costs money.
+Azure leads every tier — Microsoft-for-Startups credits are free until ~2026-09-21, and there is more credit than can be spent before then. Each tier falls back to a *second Azure model* before it will consider anything that costs money.
 
 ```
 tiers.json         source of truth — the chains, the policy, the stored keys
@@ -34,11 +34,13 @@ Pass `project="<app>"` on every call. It becomes `cf-aig-metadata` and is what m
 |---|---|---|
 | `low` | classify, tag, extract, short generation | Azure gpt-5-mini → Azure gpt-5.4 → Gemini free → Claude Haiku |
 | `high` | reasoning, structured extraction | Azure gpt-5.4 → Azure gpt-5-mini → Gemini free → Claude Sonnet |
-| `offload` | bulk / deterministic / dev work | Azure DeepSeek-V4-Pro → Azure Kimi-K2.7-Code → Azure gpt-5-mini |
-| `code` | code-heavy / agentic | Azure Kimi-K2.7-Code → Azure gpt-5.4 |
+| `offload` | bulk / deterministic / dev work | Azure DeepSeek-V4-Pro → Azure gpt-5.4 → Azure gpt-5-mini |
+| `code` | code-heavy / agentic | Azure gpt-5.4 → Azure DeepSeek-V4-Pro |
 | `embed` | embeddings, 1536-dim | Azure text-embedding-3-small |
 
 `offload` and `code` are **Azure-only by design** — they fail rather than escalate to a paid provider.
+
+`Kimi-K2.7-Code` is deliberately absent: its deployment capacity is 100 against 500 for `gpt-5.4` and `DeepSeek-V4-Pro`, so it saturates on real workloads and returns `finish_reason: length` with empty content.
 
 ## How it works
 
@@ -57,6 +59,36 @@ The client POSTs an ordered **array** of attempts to the gateway's universal end
 This uses the universal endpoint rather than *dynamic routes* for one reason: a dynamic route's model element has fields for `provider`/`model` only, with nowhere to put Azure's resource name or api-version. **Azure cannot be a dynamic-route step** — such a step never reaches the provider and logs nothing, while the route still returns 200 off the fallback, so the dead step is easy to miss. Since Azure-first is the entire policy, the chain has to live in the request.
 
 Azure throttling is per-deployment, so each tier's second step is a different Azure model — that rescues a 429 at zero cost. All deployments share one resource, so an account-level failure takes the whole Azure section with it; that is what the Google and Cloudflare steps exist for.
+
+## Choosing models
+
+**Cost is not a selection criterion while the credits last.** There is more credit than can be spent
+before they expire, so pick on capability, latency and quota headroom — never on price. A vendor
+price cut is not a reason to swap.
+
+**Don't chase releases.** A swap is one edit to `tiers.json`, so there's no advantage in being early
+and no cost to being late. Re-evaluate at exactly two moments:
+
+1. **When the credits expire** (~2026-09-21) — that's when price starts to matter at all, and the
+   chain's economics invert: the paid tail becomes the expensive part rather than the safety net.
+   Two candidates already in the Azure catalog would make that tail cheap — `gpt-5.6-luna`
+   (~$0.20/$1.20 per 1M) and `DeepSeek-V4-Flash` (~$0.14/$0.28), both close enough to free-tier
+   economics to sit above Cloudflare unified billing.
+2. **When something shows a measured win on real workloads.** Vendor benchmarks are not evidence.
+   Run the comparison against pages, prompts and tasks the apps actually send.
+
+### Azure catalog worth knowing about
+
+- **`gpt-5.6` ships as `sol` / `terra` / `luna`** — durable *capability tiers*, not sizes. They replace
+  the mini/nano suffixes and advance on their own cadence, which maps straight onto `low`/`high` here.
+  Luna's deprecation runs to 2028-01-11 against 2027-07-09 for sol and terra, so luna is the one
+  positioned as the durable high-volume workhorse.
+- **`DeepSeek-V4-Flash` looks like it beats `DeepSeek-V4-Pro`** on agentic and coding work — but those
+  results come from DeepSeek's 2026-07-31 release, and the gains are post-training only. The Azure
+  build is `2026-04-23`, three months earlier. Assume Azure serves the weaker preview weights until
+  measured otherwise; `V4-Pro` on Azure carries the same build date.
+- **DeepSeek V4 runs thinking mode by default**, billed at the output rate while invisible in the
+  response. Any estimate counting only visible output tokens understates real spend.
 
 ## Rules
 
