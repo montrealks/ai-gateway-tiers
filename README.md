@@ -12,7 +12,7 @@ client/aigw.py     the client every app installs
 ## Use it
 
 ```bash
-pip install -e ~/Projects/ai-gateway-tiers/client
+pip install -e ./client
 ```
 
 ```python
@@ -27,6 +27,13 @@ vec  = embed("a sentence")                          # 1536 dims
 Needs `CF_ACCOUNT_ID`, `CF_AIG_TOKEN` and `AZURE_RESOURCE` — see `.env.example`. No provider key: they're stored in the gateway, so calls go keyless.
 
 Pass `project="<app>"` on every call. It becomes `cf-aig-metadata` and is what makes spend traceable per app in the gateway logs.
+
+Verify a working setup, and see which provider actually answered:
+
+```bash
+python3 scripts/selftest.py            # every tier, plus json_mode, vision, embeddings
+python3 scripts/probe_text.py          # latency + correctness across deployments
+```
 
 ## The tiers
 
@@ -103,6 +110,93 @@ gcloud billing projects describe <project-id>   # billingEnabled must be false
 ```
 
 **The gateway's `cost` field cannot prove anything is free.** It's a list-price estimate that ignores hidden reasoning tokens and can understate real spend by ~8x.
+
+## Calling it from other languages
+
+The client is Python, but the wire format is just an ordered JSON array — any language can post it.
+Read the `cf-aig-model` response header to see which link answered.
+
+### TypeScript (fetch — Node, Bun, Cloudflare Workers)
+
+```ts
+const chain = [
+  { provider: "azure-openai",
+    endpoint: `${env.AZURE_RESOURCE}/gpt-5.6-luna/chat/completions?api-version=2024-10-21`,
+    headers: { "Content-Type": "application/json" },
+    query:   { messages: [{ role: "user", content: prompt }] } },
+  { provider: "anthropic",
+    endpoint: "v1/messages",
+    headers: { "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+    query:   { model: "claude-haiku-4-5-20251001", max_tokens: 4096,
+               messages: [{ role: "user", content: prompt }] } },
+];
+
+const res = await fetch(`https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/tiers`, {
+  method: "POST",
+  headers: {
+    "content-type": "application/json",
+    "cf-aig-authorization": `Bearer ${env.CF_AIG_TOKEN}`,
+    "cf-aig-metadata": JSON.stringify({ project: "my-app" }),
+  },
+  body: JSON.stringify(chain),
+});
+
+const whichModel = res.headers.get("cf-aig-model");
+```
+
+### PHP (WordPress HTTP API — same shape with Guzzle or cURL)
+
+```php
+$res = wp_remote_post(
+  sprintf('https://gateway.ai.cloudflare.com/v1/%s/tiers', getenv('CF_ACCOUNT_ID')),
+  [
+    'headers' => [
+      'Content-Type'         => 'application/json',
+      'cf-aig-authorization' => 'Bearer ' . getenv('CF_AIG_TOKEN'),
+      'cf-aig-metadata'      => wp_json_encode(['project' => 'my-app']),
+    ],
+    'body' => wp_json_encode([[
+      'provider' => 'azure-openai',
+      'endpoint' => getenv('AZURE_RESOURCE') . '/gpt-5.6-luna/chat/completions?api-version=2024-10-21',
+      'headers'  => ['Content-Type' => 'application/json'],
+      'query'    => ['messages' => [['role' => 'user', 'content' => $prompt]]],
+    ]]),
+    'timeout' => 60,
+  ]
+);
+
+$model = wp_remote_retrieve_header($res, 'cf-aig-model');
+```
+
+## Undocumented gateway behaviour
+
+Things the docs don't tell you, found by testing against a live account.
+
+**Azure cannot be a dynamic-route step.** A route's model element has fields for `provider` and
+`model` only — nowhere for Azure's resource name or api-version. Such a step never reaches the
+provider and logs nothing, while the route still returns 200 off its fallback, so the dead step is
+easy to miss. This is why the chain lives in the request via the universal endpoint.
+
+**`query` is the request body.** On the universal endpoint each element's `query` field carries the
+payload, not URL parameters. Anything that must be a URL parameter goes inside the `endpoint` string.
+
+**`dynamic/<tier>` resolves only on the gateway that owns the route.** Point a base URL at a different
+gateway and you get `400 internalCode 2005` with no log entry — indistinguishable from a broken tier,
+and it will send you debugging the wrong thing.
+
+**Stored provider keys bind by name alone.** There is no separate provider-configuration call, despite
+what the docs imply. Create a Secrets Store secret named `{gateway_id}_{provider_slug}_{alias}` scoped
+`ai_gateway` and that gateway goes keyless within seconds.
+
+**Unified billing is per-gateway and not predicted by `store_id`.** One gateway with an empty
+`store_id` serves unified fine while another with an empty `store_id` returns `401 x-api-key header is
+required`. If a gateway asks for a provider key, unified isn't enabled on it — check that gateway
+rather than copying another's `store_id`.
+
+**`cf-aig-step` does not increment.** Read `cf-aig-model` to find out which link answered.
+
+**Platform BYOK beats unified.** If a gateway holds a stored key for a provider, it is used instead of
+Cloudflare's, even for a unified-eligible provider.
 
 ## Specialist providers — not tiers
 
