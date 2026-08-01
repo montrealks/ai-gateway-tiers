@@ -24,7 +24,7 @@ out  = chat("high", prompt, images=[jpeg_b64])      # vision
 vec  = embed("a sentence")                          # 1536 dims
 ```
 
-Needs `CF_ACCOUNT_ID` and `CF_AIG_TOKEN`. Nothing else — every provider key is stored in the gateway, so calls go keyless.
+Needs `CF_ACCOUNT_ID`, `CF_AIG_TOKEN` and `AZURE_RESOURCE` — see `.env.example`. No provider key: they're stored in the gateway, so calls go keyless.
 
 Pass `project="<app>"` on every call. It becomes `cf-aig-metadata` and is what makes spend traceable per app in the gateway logs.
 
@@ -48,7 +48,7 @@ The client POSTs an ordered **array** of attempts to the gateway's universal end
 
 ```json
 [ {"provider":"azure-openai",
-   "endpoint":"kristiferszabo-0182-resource/gpt-5.6-luna/chat/completions?api-version=2024-10-21",
+   "endpoint":"$AZURE_RESOURCE/gpt-5.6-luna/chat/completions?api-version=2024-10-21",
    "headers":{"Content-Type":"application/json"},
    "query":{"messages":[]}},
   {"provider":"anthropic","endpoint":"v1/messages","headers":{},"query":{}} ]
@@ -96,10 +96,10 @@ and no cost to being late. Re-evaluate at exactly two moments:
 
 **BYOK does not mean free.** Storing a provider key moves spend onto *your* account with that provider; it bills whatever that account bills. Confirm an account is genuinely free-tier before treating a step as free.
 
-**A Google AI Studio key is free only while its Cloud project has no billing account.** Attaching billing — even for an unrelated API like Maps — silently moves the key to the paid tier, where free quota does not apply and no 429 is emitted. The key in use lives in `gen-lang-client-0291098513`, which has no billing account and therefore cannot be charged:
+**A Google AI Studio key is free only while its Cloud project has no billing account.** Attaching billing — even for an unrelated API like Maps — silently moves the key to the paid tier, where free quota does not apply and no 429 is emitted. Keep the AI Studio key in a project with no billing account, so it cannot be charged at all:
 
 ```bash
-gcloud billing projects describe gen-lang-client-0291098513   # billingEnabled must be false
+gcloud billing projects describe <project-id>   # billingEnabled must be false
 ```
 
 **The gateway's `cost` field cannot prove anything is free.** It's a list-price estimate that ignores hidden reasoning tokens and can understate real spend by ~8x.
@@ -123,7 +123,7 @@ Only these skip Azure, each a considered trade:
 Store its key as a Secrets Store secret named `tiers_{provider_slug}_default` with scope `ai_gateway`, then add a step to the chain in `tiers.json`. The name *is* the binding — there is no separate provider-configuration call.
 
 ```
-POST /accounts/$CF_ACCOUNT_ID/secrets_store/stores/d190007683ca446bb02f5aa82a3d343e/secrets
+POST /accounts/$CF_ACCOUNT_ID/secrets_store/stores/$CF_SECRETS_STORE_ID/secrets
 [{"name":"tiers_<provider>_default","value":"","scopes":["ai_gateway"]}]
 ```
 

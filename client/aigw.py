@@ -34,7 +34,9 @@ __all__ = ["chat", "embed", "achat", "aembed", "build_chain", "TierError", "TIER
 _SPEC = json.loads((pathlib.Path(__file__).parent.parent / "tiers.json").read_text())
 
 TIERS: dict[str, Any] = _SPEC["tiers"]
-_RESOURCE: str = _SPEC["azure_resource"]
+# The Azure resource name is deployment-specific, so it comes from the
+# environment rather than the spec — nothing account-shaped lives in git.
+_RESOURCE: str = os.environ.get("AZURE_RESOURCE", "")
 _API_VERSION: str = _SPEC["azure_api_version"]
 
 
@@ -83,6 +85,7 @@ def _element(
     json_mode: bool,
     temperature: float | None,
     embed_input: str | None,
+    resource: str | None = None,
 ) -> dict[str, Any]:
     """One attempt, in whatever wire format its provider speaks.
 
@@ -92,6 +95,13 @@ def _element(
     provider, model = step["provider"], step["model"]
 
     if provider == "azure-openai":
+        res = resource or _RESOURCE
+        if not res:
+            raise TierError(
+                "AZURE_RESOURCE is not set — it names your Azure AI Foundry resource "
+                "and every Azure step in a chain needs it. Pass resource=... if your "
+                "settings loader doesn't populate os.environ."
+            )
         path = step.get("path", "chat/completions")
         if path == "embeddings":
             body: dict[str, Any] = {"input": embed_input}
@@ -103,7 +113,7 @@ def _element(
                 body["temperature"] = temperature
         return {
             "provider": provider,
-            "endpoint": f"{_RESOURCE}/{model}/{path}?api-version={_API_VERSION}",
+            "endpoint": f"{res}/{model}/{path}?api-version={_API_VERSION}",
             "headers": {"Content-Type": "application/json"},
             "query": body,
         }
@@ -171,11 +181,12 @@ def build_chain(
     json_mode: bool = False,
     temperature: float | None = None,
     embed_input: str | None = None,
+    resource: str | None = None,
 ) -> list[dict[str, Any]]:
     if tier not in TIERS:
         raise KeyError(f"unknown tier {tier!r}; known: {', '.join(TIERS)}")
     return [
-        _element(s, prompt, images or [], json_mode, temperature, embed_input)
+        _element(s, prompt, images or [], json_mode, temperature, embed_input, resource)
         for s in TIERS[tier]["chain"]
     ]
 

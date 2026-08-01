@@ -18,7 +18,7 @@ import time
 
 import httpx
 
-RESOURCE = "kristiferszabo-0182-resource"
+RESOURCE = os.environ["AZURE_RESOURCE"]
 API_VERSION = "2024-10-21"
 
 MODELS = sys.argv[1:] or [
