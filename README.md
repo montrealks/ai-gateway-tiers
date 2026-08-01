@@ -32,10 +32,10 @@ Pass `project="<app>"` on every call. It becomes `cf-aig-metadata` and is what m
 
 | Tier | Purpose | Chain |
 |---|---|---|
-| `low` | classify, tag, extract, short generation | Azure gpt-5-mini → Azure gpt-5.4 → Gemini free → Claude Haiku |
-| `high` | reasoning, structured extraction | Azure gpt-5.4 → Azure gpt-5-mini → Gemini free → Claude Sonnet |
-| `offload` | bulk / deterministic / dev work | Azure DeepSeek-V4-Pro → Azure gpt-5.4 → Azure gpt-5-mini |
-| `code` | code-heavy / agentic | Azure gpt-5.4 → Azure DeepSeek-V4-Pro |
+| `low` | classify, tag, extract, short generation | Azure gpt-5.6-luna → Azure gpt-5.4 → Gemini free → Claude Haiku |
+| `high` | reasoning, structured extraction | Azure gpt-5.4 → Azure gpt-5.6-terra → Gemini free → Claude Sonnet |
+| `offload` | bulk / deterministic / dev work | Azure DeepSeek-V4-Flash → Azure DeepSeek-V4-Pro → Azure gpt-5.4 |
+| `code` | code-heavy / agentic | Azure gpt-5.4 → Azure DeepSeek-V4-Flash |
 | `embed` | embeddings, 1536-dim | Azure text-embedding-3-small |
 
 `offload` and `code` are **Azure-only by design** — they fail rather than escalate to a paid provider.
@@ -48,7 +48,7 @@ The client POSTs an ordered **array** of attempts to the gateway's universal end
 
 ```json
 [ {"provider":"azure-openai",
-   "endpoint":"kristiferszabo-0182-resource/gpt-5-mini/chat/completions?api-version=2024-10-21",
+   "endpoint":"kristiferszabo-0182-resource/gpt-5.6-luna/chat/completions?api-version=2024-10-21",
    "headers":{"Content-Type":"application/json"},
    "query":{"messages":[]}},
   {"provider":"anthropic","endpoint":"v1/messages","headers":{},"query":{}} ]

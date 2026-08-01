@@ -16,7 +16,7 @@
       "chain": [
         {
           "provider": "azure-openai",
-          "model": "gpt-5-mini",
+          "model": "gpt-5.6-luna",
           "cost": "free (MS credits)"
         },
         {
@@ -46,7 +46,7 @@
         },
         {
           "provider": "azure-openai",
-          "model": "gpt-5-mini",
+          "model": "gpt-5.6-terra",
           "cost": "free (MS credits)"
         },
         {
@@ -66,17 +66,17 @@
       "chain": [
         {
           "provider": "azure-openai",
+          "model": "DeepSeek-V4-Flash",
+          "cost": "free (MS credits)"
+        },
+        {
+          "provider": "azure-openai",
           "model": "DeepSeek-V4-Pro",
           "cost": "free (MS credits)"
         },
         {
           "provider": "azure-openai",
           "model": "gpt-5.4",
-          "cost": "free (MS credits)"
-        },
-        {
-          "provider": "azure-openai",
-          "model": "gpt-5-mini",
           "cost": "free (MS credits)"
         }
       ]
@@ -91,7 +91,7 @@
         },
         {
           "provider": "azure-openai",
-          "model": "DeepSeek-V4-Pro",
+          "model": "DeepSeek-V4-Flash",
           "cost": "free (MS credits)"
         }
       ]
@@ -162,12 +162,13 @@
     "tiers_groq_default": "Groq free tier",
     "tiers_cerebras_default": "Cerebras free tier"
   },
-  "_deployment_capacity": "Azure throttling is per-deployment TPM, set by sku.capacity. gpt-5.4 and DeepSeek-V4-Pro are 500; text-embedding-3-small 120; Kimi-K2.7-Code 100; gpt-5-mini and the image models 50. Kimi-K2.7-Code is deliberately NOT in any chain: at 100 it saturates on real workloads and returns finish_reason 'length' with empty content. Send code work to gpt-5.4. Check with: az cognitiveservices account deployment list --name kristiferszabo-0182-resource --resource-group rg-helloplaydate -o table",
+  "_deployment_capacity": "Azure throttling is per-deployment TPM, set by sku.capacity, and capacity is free — provision to the entitlement ceiling rather than guessing. Current: gpt-5.4, gpt-5-mini, gpt-5.6-luna/terra/sol and text-embedding-3-small at 2000; DeepSeek-V4-Pro 1000; DeepSeek-V4-Flash 250 (its own quota ceiling); Kimi-K2.7-Code 100 and entitled to only 100, which is why it saturates and is in no chain. Check entitlement before deploying: az cognitiveservices usage list -l eastus2. List deployments: az cognitiveservices account deployment list --name kristiferszabo-0182-resource --resource-group rg-helloplaydate -o table",
   "_model_churn": "Do NOT chase model releases. A swap is one edit to this file, so there is no advantage in being early and no cost to being late. Re-evaluate at two moments only: (1) when Azure credits expire, which is when price starts to matter at all, and (2) when a candidate shows a MEASURED win on real workloads. Vendor benchmarks are not evidence — run the comparison. Price cuts alone are never a reason to swap while credits last.",
   "_when_credits_expire": "Around 2026-09-21 the Azure lane stops being free and the chain's economics invert: the paid tail (Google free tier, then Cloudflare unified at Claude/OpenAI list price +5%) becomes the expensive part rather than the safety net. Candidates that make the post-credit chain cheap, both already in the Azure catalog: openai gpt-5.6-luna (~$0.20/$1.20 per 1M) and DeepSeek-V4-Flash (~$0.14/$0.28). Both are close enough to free-tier economics to sit above Cloudflare unified. Revisit the whole chain then, not before.",
   "azure_catalog_notes": {
     "gpt-5.6": "Three variants — sol (flagship), terra (balanced), luna (cost-efficient). These are DURABLE CAPABILITY TIERS, not sizes; they replace the mini/nano suffixes and advance on their own cadence, which maps directly onto this file's low/high. All three deployable, build 2026-07-09. Luna's deprecation runs to 2028-01-11 vs 2027-07-09 for sol and terra, so luna is the one Microsoft is positioning as the durable high-volume workhorse.",
     "DeepSeek-V4-Flash": "Deployable, and on paper it beats DeepSeek-V4-Pro on agentic and coding work. CAVEAT: those results come from DeepSeek's official 2026-07-31 release, whose gains are post-training only. The Azure build is 2026-04-23 — three months earlier, i.e. preview-era weights. Assume Azure serves the WEAKER model until measured otherwise. V4-Pro on Azure carries the same 2026-04-23 build.",
     "reasoning_tokens": "DeepSeek V4 models run thinking mode by default and bill it at the output rate while it stays invisible in the response. Any cost estimate that counts only visible output tokens will understate real spend — the same trap that makes the gateway's `cost` field unreliable."
-  }
+  },
+  "_measured": "Chain order is set by measurement, not release date. Correctness was identical across every candidate on both a vision/JSON rubric and structured-extraction tasks, so latency and quota headroom decide. Median latency on deterministic text: DeepSeek-V4-Flash 1.2s, gpt-5.4 1.6s, gpt-5.6-terra 1.6s, gpt-5.6-sol 1.7s, gpt-5.6-luna 1.8s, DeepSeek-V4-Pro 1.5s (but 2.3x the total wall time), gpt-5-mini 3.4s. On a vision rubric: gpt-5.4 25s, gpt-5.6-terra 30s, gpt-5.6-sol 43s, gpt-5.6-luna 64s, gpt-5-mini 89s. Newer is NOT automatically faster — gpt-5.4 beat every gpt-5.6 variant on both axes, which is why `high` still leads with it. Reproduce: selftest.py and .tmp/text_probe.py."
 }
