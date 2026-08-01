@@ -33,7 +33,11 @@ Verify a working setup, and see which provider actually answered:
 ```bash
 python3 scripts/selftest.py            # every tier, plus json_mode, vision, embeddings
 python3 scripts/probe_text.py          # latency + correctness across deployments
+python3 scripts/stress.py 120 30       # concurrency, attribution, and failover
 ```
+
+`stress.py` deliberately breaks the first step of a chain and asserts a later one still answers —
+failover is the property the whole design rests on, and it's invisible in normal operation.
 
 ## The tiers
 
