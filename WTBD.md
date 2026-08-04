@@ -85,6 +85,37 @@ probably wrong endpoint/model ids rather than genuine unavailability, so they ne
 ## Progress
 <!-- newest note first; one entry per completed task -->
 
+### 2026-08-04 — Both VPS defects fixed
+
+**1. cnx-cinema scraper crash loop — root-caused and fixed, not just cleared.**
+The lock is a timestamp file. `heartbeat()` was called ONCE per hourly loop, so "alive" had to be
+defined loosely enough to cover a slow iteration — hence `STALE_MS = SCRAPE_INTERVAL * 1.5` (90
+min). The cost landed on the other side: a container killed WITHOUT SIGTERM never runs
+`releaseLock()`, so the restarting peer crash-loops against a lock nothing will reclaim for up to
+90 minutes. The reboot did exactly that; 15 restarts before I cleared it by hand.
+
+Fix (commit 4af2081, deployed): refresh the lock on a 60s `setInterval(...).unref()` so freshness
+no longer depends on iteration length, and drop `STALE_MS` to 5 min. A busy holder still holds,
+because it now heartbeats DURING the work rather than only before it.
+
+Wrote a behavioural test first (none existed): cold acquire, live holder not displaced, 6-min-dead
+holder reclaimed, busy heartbeating holder not displaced, and the exact 59-min reboot scenario.
+6/6 pass. Verified in production after deploy: `restarts=0`, and the lock file's age sits at ~28s,
+proving the timer is running.
+
+**2. Dead Gemini key on the VPS — replaced, not deleted.**
+`/root/.secrets.env` line 24 held `…hezx3-Ug`, injected into ~12 containers (helloplaydate-api,
+profilo-api, gooser, ducker, bowerbirder, media-api, uppy-companion…). Same key everywhere, and
+401 Unauthorized — almost certainly from the deleted billed project.
+
+Replaced with the free-tier key rather than removing it: anything currently 401ing starts working,
+and it cannot bill. Verified 200 from the VPS itself. File backed up as `.secrets.env.bak-<ts>`.
+
+NOTE: `env_file` is read at container CREATE, so existing containers still hold the old dead value
+until they are recreated. Deliberately did NOT recreate 12 containers at 01:00 — helloplaydate
+does not read GEMINI_API_KEY at all, so nothing is waiting on it. They will pick it up on their
+next deploy.
+
 ### 2026-08-04 — VPS RECOVERED, and the VPS audit finally ran
 Kris supplied a fresh `HOSTINGER_API_TOKEN` (now in .zshrc). That unlocked the box:
 
