@@ -85,6 +85,29 @@ probably wrong endpoint/model ids rather than genuine unavailability, so they ne
 ## Progress
 <!-- newest note first; one entry per completed task -->
 
+### 2026-08-04 — VPS RECOVERED, and the VPS audit finally ran
+Kris supplied a fresh `HOSTINGER_API_TOKEN` (now in .zshrc). That unlocked the box:
+
+- VPS is `id=1076610`, `srv1076610.hstgr.cloud`, **public IP 31.97.191.96**, Ubuntu 24.04.
+- SSH on 22 from the public IP TIMES OUT, and Hostinger's cloud firewall has ZERO rules — so the
+  block is the guest OS firewall, hardened to accept SSH only over the tailnet. There is genuinely
+  no way in while Tailscale is down. Worth knowing before hunting for one again.
+- Only remote lever was `POST /api/vps/v1/virtual-machines/1076610/restart`. Rebooted; tailscaled
+  is systemd-enabled so it came back with the box. helloplaydate.com never dropped below 200
+  during the reboot.
+
+**VPS audit results:**
+- helloplaydate-api: healthy. All creds present. Live tier call from inside prod returns 'pong',
+  so the container's gateway path is intact after today's changes.
+- **The VPS holds a THIRD Gemini key** — suffix `hezx3-Ug`, not the free key (`-8hoQG4A`) and not
+  the old billed one. It is **401 Unauthorized / DEAD**, almost certainly from the deleted
+  `gen-lang-client-0784708444`. Harmless: nothing in `app/` or `scripts/` reads GEMINI_API_KEY, so
+  it is dead weight in the container env. Local .env sweeps could never have found it.
+- **cnx-cinema-scraper is in a restart loop**: "another scheduler instance holds the lock —
+  exiting", backing off 2s -> 60s. Not a crash and not caused by today's work — a stale scheduler
+  lock the reboot did not clear. Needs its own look.
+- profilo-api, cnx-cinema-api, uppy-companion, helloplaydate-cron all healthy.
+
 ### 2026-08-04 — Task G: last open key restricted, and found to be dead weight
 Restricted earnest-vine `API key 1` (uid f153d80b) from unrestricted-anything to:
 - APIs: `photospicker`, `photoslibrary`
