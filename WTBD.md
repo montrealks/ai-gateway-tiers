@@ -78,13 +78,38 @@ probably wrong endpoint/model ids rather than genuine unavailability, so they ne
 - [ ] E. Swap the tail on the low-stakes gateways first (profilo, then helloplaydate, then
       kboodle) and measure for a day.
 - [ ] F. **FLAG FIRST** — swap route1views' tail once E has shown a clean day.
-- [ ] G. Restrict `earnest-vine-120619` "API key 1" — currently unrestricted (any API, any
-      caller); it is the last fully-open key in the estate.
+- [x] G. Restrict `earnest-vine-120619` "API key 1" — done; and it turns out to be VESTIGIAL.
 - [ ] H. Evaluate folding earnest-vine into route1views *(recommendation: DEFER — see note)*
 - [ ] I. Re-run the harness, diff against `final`, confirm no capability regressions.
 
 ## Progress
 <!-- newest note first; one entry per completed task -->
+
+### 2026-08-04 — Task G: last open key restricted, and found to be dead weight
+Restricted earnest-vine `API key 1` (uid f153d80b) from unrestricted-anything to:
+- APIs: `photospicker`, `photoslibrary`
+- Referrers: `route1views.com/*`, `*.route1views.com/*`, `route1views.ddev.site/*`
+  (the same domain set already proven on route1views' working Maps Platform key)
+
+That closes the last fully-open key in the estate.
+
+**The verification detour is the interesting part.** My first attempt to prove the referrer lock
+was inconclusive: correct and attacker referrers BOTH returned 401 "API keys are not supported by
+this API. Expected OAuth2 access token" — the Photos Picker `sessions` endpoint is OAuth-only and
+cannot exercise a key restriction at all. That left a restriction applied to a live browser key on
+the most disruption-averse client with no proof it was safe.
+
+Resolved by reading the consumer instead of probing the API. In
+`assets/js/media-widget/Rov_GooglePhotos.js`, `this.API_KEY` is assigned on line 4 and **never
+referenced again**; every picker call authenticates with `Authorization: Bearer ${accessToken}`
+(OAuth, scope `photospicker.mediaitems.readonly`). So:
+- the restriction cannot break the picker, because the key is never transmitted;
+- route1views has been shipping an unused API key to every browser that loads the media widget;
+- the 3 photospicker calls/30d on earnest-vine are OAuth-authenticated, not key-authenticated.
+
+Follow-up available (not done): the key could be deleted outright and `googlePhotosApiKey()` /
+the `apiKey` entry in `MediaWidgetProvider::wp_localize_script` removed. Left alone because it
+touches route1views and buys nothing beyond tidiness now the key is locked down.
 
 ### 2026-08-04 — place-scout rewired off its own Places key
 `~/Projects/place-scout` was the second holder of a Google Places key. It now calls the shared
