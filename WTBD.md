@@ -66,7 +66,7 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 - [x] H. Create the `places-scout` project — billing, Places API, restricted key
 - [~] I. Migrate the places-scout Worker to the new key *(swapped + worker healthy; END-TO-END AUTH TEST PENDING — needs $PLACES_SCOUT_TOKEN)*
 - [x] J. Store Azure secrets on the kboodle and route1views gateways
-- [ ] K. Create dynamic routes on kboodle, helloplaydate and profilo gateways *(runs AFTER L — routes need the secrets)*
+- [x] K. Create dynamic routes on kboodle, helloplaydate and profilo gateways
 - [x] L. Add google-ai-studio secrets for the helloplaydate and profilo gateways *(+ azure for profilo, + linked profilo to the secrets store)*
 - [ ] M. **FLAG FIRST** — add Azure step + retries to route1views' existing `low` route
 - [ ] N. **FLAG FIRST** — restrict route1views' unrestricted "Maps Server Key"
@@ -75,6 +75,28 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 
 ## Progress
 <!-- newest note first; one entry per completed task -->
+
+### 2026-08-04 — Task K (+ retraction of Finding 2)
+Created `low` dynamic routes on kboodle, helloplaydate and profilo:
+
+    Gemini free (retries 2) -> Azure gpt-5.4 (retries 1) -> Anthropic Haiku (retries 0)
+
+API notes: create wants `{"name","elements"}` — `elements`, NOT `data`, even though GET returns
+the same array under `data`. POST to /ai-gateway/gateways/{gw}/routes.
+
+Retries on the Gemini step are the point: the free tier's binding limit is 15 req/min, not the
+1500/day cap, so a short burst should be absorbed rather than immediately bought from Anthropic.
+
+Back-pressure: all three gateways return 200 for `model: dynamic/low` via /compat/chat/completions.
+
+**Retracted a wrong finding.** I had recorded that an unlinked gateway silently bills CF unified,
+based on a cost-field difference. It was a cache hit (`cached: True`, 0 tokens). Verified properly
+instead via Google Cloud monitoring: gateway traffic DOES land on the free Google projects
+(gen-lang-client-0291098513 and kboodle), which would not happen if Cloudflare were using its own
+key. So BYOK is working on both direct and dynamic-route calls.
+
+Lesson worth keeping: never use the gateway `cost` field to prove anything about billing — check
+the provider-side project usage instead.
 
 ### 2026-08-04 — Task L (+ two findings)
 Created `helloplaydate_google-ai-studio_default`, `profilo_google-ai-studio_default` and
@@ -85,11 +107,15 @@ store, so BYOK could not work no matter what secrets existed. Fixed by PUTting t
 config with `store_id` set (PATCH is not supported on that endpoint — returns "Route not found";
 GET the config, modify, PUT it back).
 
-**Finding 2 — an unlinked gateway silently bills Cloudflare unified rather than failing.**
-Gateway logs prove it: the profilo Gemini call at 10:41:37, before linking, returned 200 with
-`cost=2e-06`. The identical call at 10:44:56, after linking, returned `cost=0`. So a missing BYOK
-key does NOT fail closed — it quietly routes to paid unified billing. Sums are trivial here, but
-this is the same silent-cost shape as the July incident and is worth encoding in the docs (task P).
+**Finding 2 — RETRACTED (see Task K note).** I claimed an unlinked gateway silently bills
+Cloudflare unified, inferring it from a `cost=0` vs `cost=2e-06` difference. That was wrong: the
+zero-cost entry had `cached: True` and 0 tokens — an ordinary cache hit (cache_ttl 300s, and I was
+reusing an identical prompt). The `cost` field cannot distinguish who paid; tiers.json already
+says so explicitly.
+
+What DOES hold: profilo's azure calls genuinely 401'd until store_id was set, so an unlinked
+gateway really is broken for BYOK-only providers. Google kept working because Cloudflare can serve
+that provider itself; Azure it cannot.
 
 Back-pressure: gemini AND azure both return 200 through profilo and helloplaydate gateways.
 
