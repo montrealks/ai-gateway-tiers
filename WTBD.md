@@ -59,8 +59,8 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
       already non-functional since its API was disabled, so it cannot affect baseline capability)*
 - [x] B. Build `scripts/audit_estate.py` and capture the BASELINE snapshot
 - [x] C. Lock down cnxlocal "API key 3" — unrestricted across ~32 Maps APIs on a billed project
-- [ ] D. Delete kboodle's unused Maps key (dead code path, 4 calls in 70 days)
-- [ ] E. Unlink billing from the kboodle project
+- [ ] D. **BLOCKED** — kboodle's Maps key is NOT dead; it feeds ACF's Google Map field. Awaiting decision.
+- [ ] E. **BLOCKED by D** — unbilling kills Maps Platform, which ACF's map field needs
 - [ ] F. Re-enable generativelanguage on kboodle and mint its own Gemini key
 - [ ] G. Repoint `kboodle_google-ai-studio_default` to kboodle's own key (stop spending Kris's quota)
 - [ ] H. Create the `places-scout` project — billing, Places API, restricted key
@@ -75,6 +75,28 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 
 ## Progress
 <!-- newest note first; one entry per completed task -->
+
+### 2026-08-04 — Task D BLOCKED (plan confounded)
+My earlier "dead code path" finding was WRONG — it came from a grep scoped only to `src` for the
+accessor name. Widening it found two real consumers:
+
+- `ThemeProvider::configureAcfGoogleMaps()` — registers an `acf/fields/google_map/api` filter,
+  i.e. the key powers ACF's **Google Map field** in wp-admin.
+- `AssetProvider::setGoogleMapsApiKey()` — localises the key into front-end scripts.
+
+That explains the tiny usage (4 calls in 70 days): an admin map picker only calls Google when an
+editor actually opens the field. Low usage, but live functionality.
+
+Consequences:
+- Task D (delete the key) would break the admin map picker.
+- Task E (unbill kboodle) would too — Maps Platform requires billing.
+- Which breaks tasks F/G (kboodle's own free Gemini quota), since free tier needs an unbilled
+  project.
+
+Could NOT determine whether an ACF `google_map` field actually exists: none is defined in theme
+code, but ACF field groups can be created in the DB via the UI, and ddev is not running.
+
+Options put to Kris — awaiting his call before proceeding past D.
 
 ### 2026-08-04 — Task C
 Narrowed cnxlocal "API key 3" (`2b6802f8`) from **32 API targets to 10** — the set with observed
