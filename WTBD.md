@@ -58,7 +58,7 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 - [x] A. Delete kboodle's dead Gemini API key *(done before this plan existed; the key was
       already non-functional since its API was disabled, so it cannot affect baseline capability)*
 - [x] B. Build `scripts/audit_estate.py` and capture the BASELINE snapshot
-- [ ] C. Lock down cnxlocal "API key 3" — unrestricted across ~32 Maps APIs on a billed project
+- [x] C. Lock down cnxlocal "API key 3" — unrestricted across ~32 Maps APIs on a billed project
 - [ ] D. Delete kboodle's unused Maps key (dead code path, 4 calls in 70 days)
 - [ ] E. Unlink billing from the kboodle project
 - [ ] F. Re-enable generativelanguage on kboodle and mint its own Gemini key
@@ -75,6 +75,25 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 
 ## Progress
 <!-- newest note first; one entry per completed task -->
+
+### 2026-08-04 — Task C
+Narrowed cnxlocal "API key 3" (`2b6802f8`) from **32 API targets to 10** — the set with observed
+traffic in the last 30 days (places, places-backend, maps-backend, geocoding, directions,
+distance-matrix, elevation, timezone, static-maps, street-view).
+
+Research: nothing in the cnxlocal repo references this key. The only Google key usage there is
+the places-scout worker, which reads `GOOGLE_PLACES_API_KEY` — that's the separate "Places Scout"
+key, already scoped to places only. But API key 3 did make ~8 calls in 30 days across
+Directions/Elevation/Timezone/StreetView, so an unknown caller exists. Narrowing rather than
+deleting keeps that caller working while cutting blast radius; deletion is the follow-up once
+cnxlocal retires in task O (console offers "Restore deleted credentials", so it's recoverable).
+
+Back-pressure: both cnxlocal keys still return 200 from places:searchText after the change, and
+the smoketest is green.
+
+NOT fixed: the key still has no referrer/IP restriction, so possession is still sufficient to use
+it. Can't lock that down without knowing whether the caller is browser or server-side. Revisit in
+task O when the project retires.
 
 ### 2026-08-04 — Task B
 Built `scripts/audit_estate.py` (snapshot + `--diff`) and captured `.tmp/estate-baseline.json`.
