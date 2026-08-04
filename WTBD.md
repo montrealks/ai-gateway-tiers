@@ -65,8 +65,8 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 - [x] G. Repoint `kboodle_google-ai-studio_default` to kboodle's own key (stop spending Kris's quota)
 - [x] H. Create the `places-scout` project — billing, Places API, restricted key
 - [~] I. Migrate the places-scout Worker to the new key *(swapped + worker healthy; END-TO-END AUTH TEST PENDING — needs $PLACES_SCOUT_TOKEN)*
-- [ ] J. Store Azure secrets on the kboodle and route1views gateways
-- [ ] K. Create dynamic routes on kboodle, helloplaydate and profilo gateways
+- [x] J. Store Azure secrets on the kboodle and route1views gateways
+- [ ] K. Create dynamic routes on kboodle, helloplaydate and profilo gateways *(runs AFTER L — routes need the secrets)*
 - [ ] L. Add google-ai-studio secrets for the helloplaydate and profilo gateways
 - [ ] M. **FLAG FIRST** — add Azure step + retries to route1views' existing `low` route
 - [ ] N. **FLAG FIRST** — restrict route1views' unrestricted "Maps Server Key"
@@ -75,6 +75,21 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 
 ## Progress
 <!-- newest note first; one entry per completed task -->
+
+### 2026-08-04 — Task J
+Created `kboodle_azure-openai_default` and `route1views_azure-openai_default` in the CF secrets
+store, so both client gateways can reach Azure keylessly. This is the prerequisite for putting a
+free Azure step between Gemini and paid Anthropic in their routes.
+
+Verified the Azure key still works directly (200) before storing it, then verified BOTH gateways
+answer through it keylessly (200 'pong' each).
+
+Storing a secret does not change any routing behaviour on its own — route1views' live `low` route
+is untouched, which keeps task M genuinely FLAG FIRST.
+
+Reordered: L now runs before K, since a route referencing a provider with no stored secret would
+fail. profilo has NO secrets at all (needs google + azure); helloplaydate has azure+fal (needs
+google).
 
 ### 2026-08-04 — Task I (partial — verification gap)
 Swapped the Worker secret `GOOGLE_PLACES_API_KEY` on `places-scout` to the new
