@@ -68,13 +68,50 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 - [x] J. Store Azure secrets on the kboodle and route1views gateways
 - [x] K. Create dynamic routes on kboodle, helloplaydate and profilo gateways
 - [x] L. Add google-ai-studio secrets for the helloplaydate and profilo gateways *(+ azure for profilo, + linked profilo to the secrets store)*
-- [ ] M. **FLAG FIRST** — add Azure step + retries to route1views' existing `low` route
-- [ ] N. **FLAG FIRST** — restrict route1views' unrestricted "Maps Server Key"
+- [x] M. Add Azure step + retries to route1views' `low` route *(approved by Kris)*
+- [x] N. ~~Restrict route1views' "Maps Server Key"~~ — **deliberately SKIPPED**, see note
 - [ ] O. Retire the cnxlocal project *(conditional: only after I has shown a clean week)*
 - [ ] P. Re-run the harness, diff against baseline, update README/tiers.json to match reality
 
 ## Progress
 <!-- newest note first; one entry per completed task -->
+
+### 2026-08-04 — Task N: deliberately SKIPPED
+The key is already API-restricted to `geocoding-backend` alone, so its blast radius is one API on
+one project. The only remaining lock would be an IP restriction, and it is a SERVER-side key —
+referrer restrictions do not apply, and guessing the wrong egress IP breaks geocoding on
+route1views production. Low value, real downside, on the client least tolerant of disruption.
+Not a good trade. Revisit only if the host's egress IP is ever documented with certainty.
+
+### 2026-08-04 — Task M
+route1views `low` route is now:
+
+    gemini-3.1-flash-lite (retries 2) -> azure gpt-5.4 (retries 1) -> claude-haiku (retries 0)
+
+Previously google -> anthropic, so a Gemini rate-limit bought Anthropic tokens while free Azure
+credits sat unused.
+
+Where this actually applies: `SpamScoreService`, `CreatorHelpersController`, `CreatorController`,
+`UserDraftsService`. Spam scoring **fails open** (`catch(\Throwable) -> ['score' => null]`), so an
+LLM failure never breaks submissions — it lets content through UNSCORED. The Azure step therefore
+buys moderation coverage, not uptime, and carries no outage risk.
+
+Verified: active version `918360ec`; three consecutive live calls returned 200 and the gateway log
+shows all three served by `google-ai-studio` (the free first step), `cached=False`.
+
+Rollback: redeploy version `5921e653` via
+`POST /routes/{id}/deployments {"version_id": "5921e653-..."}`.
+
+**API notes (hard-won):**
+- Routes: create = `POST /routes` with `{"name","elements"}`; update = `POST /routes/{id}/versions`
+  with `{"elements"}` then `POST /routes/{id}/deployments` with `{"version_id"}`. PUT 404s.
+- Gateways: update = GET the config, modify, `PUT` it whole. PATCH 404s. (Opposite convention.)
+
+**Mistake worth recording:** I probed `POST /versions` with `{"elements":[]}` against route1views
+PRODUCTION to discover the API shape, creating a stray empty version `159f456a`. It was never
+deployed so traffic was unaffected, but the probe should have been run against profilo. There is
+no DELETE for versions, so the empty one is permanent clutter. Probe write endpoints on the
+lowest-stakes resource, never the client that cannot tolerate disruption.
 
 ### 2026-08-04 — Interim harness run + two harness bugs fixed
 Captured `.tmp/estate-interim.json` and diffed against baseline: **no capability regressions**,
