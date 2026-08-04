@@ -59,10 +59,10 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
       already non-functional since its API was disabled, so it cannot affect baseline capability)*
 - [x] B. Build `scripts/audit_estate.py` and capture the BASELINE snapshot
 - [x] C. Lock down cnxlocal "API key 3" — unrestricted across ~32 Maps APIs on a billed project
-- [ ] D. **BLOCKED** — kboodle's Maps key is NOT dead; it feeds ACF's Google Map field. Awaiting decision.
-- [ ] E. **BLOCKED by D** — unbilling kills Maps Platform, which ACF's map field needs
-- [ ] F. Re-enable generativelanguage on kboodle and mint its own Gemini key
-- [ ] G. Repoint `kboodle_google-ai-studio_default` to kboodle's own key (stop spending Kris's quota)
+- [x] D. Delete kboodle's Maps key *(Kris confirmed the ACF map wiring is leftover, unused)*
+- [x] E. Unlink billing from the kboodle project
+- [x] F. Re-enable generativelanguage on kboodle and mint its own Gemini key
+- [x] G. Repoint `kboodle_google-ai-studio_default` to kboodle's own key (stop spending Kris's quota)
 - [ ] H. Create the `places-scout` project — billing, Places API, restricted key
 - [ ] I. Migrate the places-scout Worker to the new key and verify traffic moves projects
 - [ ] J. Store Azure secrets on the kboodle and route1views gateways
@@ -75,6 +75,30 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 
 ## Progress
 <!-- newest note first; one entry per completed task -->
+
+### 2026-08-04 — Tasks D, E, F, G (+ machine reboot)
+Kris confirmed the ACF Google Map wiring is leftover and unused, unblocking D. Both PHP call
+sites (`ThemeProvider::configureAcfGoogleMaps`, `AssetProvider::setGoogleMapsApiKey`) have
+`?: ''` fallbacks, so they degrade to an empty key rather than erroring.
+
+- **D** — deleted kboodle API key `2a0350ac`. Project now has no Maps key.
+- **E** — unlinked billing from the kboodle project. `billingEnabled: false`.
+- **F** — re-enabled `generativelanguage` (safe now the project cannot be charged) and minted
+  key `33857af1` "kboodle Gemini (free tier)", scoped to that one API. Verified 200 directly.
+- **G** — repointed secret `17622324` so the kboodle gateway uses kboodle's OWN key. Bob's site
+  now draws on Bob's free quota instead of Kris's.
+
+**kboodle is now the target end state**: unbilled, client co-owned, its own OAuth, its own free
+Gemini quota, and structurally unable to generate a bill.
+
+Machine rebooted mid-task. State verified intact afterwards: env vars present (GEMINI_API_KEY
+correctly served from .zshrc, so the earlier launchctl-only fragility is resolved), gcloud still
+authenticated, kboodle state as above.
+
+Back-pressure: kboodle gateway returns 200 'pong'; smoketest green.
+
+Note: `wp-config.php` still defines `KBOODLE_GOOGLE_MAPS_API_KEY` pointing at the deleted key.
+Harmless (both consumers fall back to ''), but worth removing next time that file is touched.
 
 ### 2026-08-04 — Task D BLOCKED (plan confounded)
 My earlier "dead code path" finding was WRONG — it came from a grep scoped only to `src` for the
