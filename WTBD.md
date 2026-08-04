@@ -69,7 +69,7 @@ probably wrong endpoint/model ids rather than genuine unavailability, so they ne
       candidates against the REAL workload (spam-score JSON reliability + latency, not "say pong").
       **Constraint discovered: Azure DeepSeek-V4 has tool calling DISABLED and is text-only**, so it
       cannot serve tool-using or vision work — it is only a candidate for plain text tails.
-- [ ] J. **Highest value** — port helloplaydate's six hardcoded Claude call sites to named tiers
+- [~] J. **IN PROGRESS (2/7 done)** — port helloplaydate's hardcoded Claude call sites to named tiers
       (`face_check.py`, `character_bible.py` ×2, `likeness_gate.py`, `vision_meta.py`,
       `storybook/narrative.py`, `premade_search.py`). Volume-scaled premium spend; separate repo.
 - [ ] K. Add prompt caching to the analytics-digest agent (~$8/mo -> ~$4/mo per the audit).
@@ -85,6 +85,37 @@ probably wrong endpoint/model ids rather than genuine unavailability, so they ne
 
 ## Progress
 <!-- newest note first; one entry per completed task -->
+
+### 2026-08-04 — Task J in progress (2 of 7 sites)
+Working in an isolated git worktree at `~/Projects/.wt-hpd-llm-port`, branch
+`chore/port-hardcoded-llm-callsites`, based on helloplaydate HEAD. Kris has uncommitted WIP on
+`feat/seasonal-marketing-layer` (templates + copy_contract) and untracked docs, so landing
+LLM-cost commits there would tangle unrelated history. His main tree is untouched.
+
+**Done and verified LIVE (not just mocked):**
+1. `face_check.py` — the highest-volume site (every photo upload, 4 routers). Now `chat("low",
+   images=[...], json_mode=True)`. Live vision call returned a real verdict in 4.6s and the
+   gateway log confirms `azure-openai / gpt-5.6-luna`, project `helloplaydate/face_check` — i.e.
+   the FREE first step. Net -70 lines.
+2. `premade_search.break_story` — text-only, async, now `achat("low", json_mode=True)`. Live call
+   produced 4 correctly-personalised scenes in 5.4s.
+
+**Gotchas worth carrying to the remaining sites:**
+- The tier client has NO `system` parameter (a system prompt is not portable across a chain), so
+  fold the framing into the prompt.
+- `json_mode` maps to `response_format: json_object` on the Azure steps, which REJECTS a top-level
+  array. Ask for `{"scenes": [...]}` and unwrap.
+- These sites all used the helloplaydate gateway; the tier client uses the `tiers` gateway. Pass
+  `project="helloplaydate/<site>"` so per-site spend stays attributable.
+- `tests/test_face_check.py` was ALREADY FAILING on master — it cleared the gateway settings to
+  exercise a direct-provider path a later change forbade. Rewritten against the tier client;
+  11/11 pass and it no longer needs credentials at all.
+
+**Remaining, in value order:** `character_bible.py` (2 sites, one is **claude-sonnet-5** on a
+per-child multi-sample path — highest remaining value), `likeness_gate.py`,
+`storybook/narrative.py`, then `vision_meta.py` last: it is an OFFLINE ingest tool with retry
+logic and Haiku-specific cost tracking (`usage_cost_usd`, `PRICE_*_PER_MTOK`) that needs rework
+rather than a swap, and it has no runtime callers.
 
 ### 2026-08-04 — Task B ANSWERED (by a pre-existing audit, not by me)
 `~/Projects/helloplaydate/docs/audits/2026-08-03-digest-model-cost-audit.md` already investigated
