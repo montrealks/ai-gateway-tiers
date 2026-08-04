@@ -63,7 +63,7 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 - [x] E. Unlink billing from the kboodle project
 - [x] F. Re-enable generativelanguage on kboodle and mint its own Gemini key
 - [x] G. Repoint `kboodle_google-ai-studio_default` to kboodle's own key (stop spending Kris's quota)
-- [ ] H. Create the `places-scout` project — billing, Places API, restricted key
+- [x] H. Create the `places-scout` project — billing, Places API, restricted key
 - [ ] I. Migrate the places-scout Worker to the new key and verify traffic moves projects
 - [ ] J. Store Azure secrets on the kboodle and route1views gateways
 - [ ] K. Create dynamic routes on kboodle, helloplaydate and profilo gateways
@@ -75,6 +75,25 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 
 ## Progress
 <!-- newest note first; one entry per completed task -->
+
+### 2026-08-04 — Task H
+Created Google project `places-scout-kris` (display name "places-scout"). The id `places-scout`
+was unavailable, so the id and display name differ — per the naming lesson from the July
+incident, always identify this one by ID.
+
+Linked billing (Places API requires it), enabled ONLY `places.googleapis.com`, and minted key
+`eb4cf64d` "Places Scout" scoped to that single API.
+
+Rationale: places-scout is shared tooling for Kris AND Lily across multiple areas, so billing it
+to the `cnxlocal` client project mis-attributed the cost. This gives it its own home and makes
+cnxlocal retirable.
+
+Back-pressure: new key returns 200 from `places:searchText` ("Fern Forest Cafe").
+
+Next (task I): swap the Worker secret. The worker reads `GOOGLE_PLACES_API_KEY`; it lives at
+~/Projects/cnxlocal/workers/places-scout/. Wrangler needs CLOUDFLARE_API_TOKEN in env — it is
+NOT exported by default (keychain-gated behind `cf-load`), so that command may need Kris to run
+it, or the key read from the keychain inline.
 
 ### 2026-08-04 — Tasks D, E, F, G (+ machine reboot)
 Kris confirmed the ACF Google Map wiring is leftover and unused, unblocking D. Both PHP call
