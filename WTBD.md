@@ -64,7 +64,7 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 - [x] F. Re-enable generativelanguage on kboodle and mint its own Gemini key
 - [x] G. Repoint `kboodle_google-ai-studio_default` to kboodle's own key (stop spending Kris's quota)
 - [x] H. Create the `places-scout` project — billing, Places API, restricted key
-- [~] I. Migrate the places-scout Worker to the new key *(swapped + worker healthy; END-TO-END AUTH TEST PENDING — needs $PLACES_SCOUT_TOKEN)*
+- [x] I. Migrate the places-scout Worker to the new key *(verified end-to-end after rotating CALLER_TOKEN)*
 - [x] J. Store Azure secrets on the kboodle and route1views gateways
 - [x] K. Create dynamic routes on kboodle, helloplaydate and profilo gateways
 - [x] L. Add google-ai-studio secrets for the helloplaydate and profilo gateways *(+ azure for profilo, + linked profilo to the secrets store)*
@@ -75,6 +75,20 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 
 ## Progress
 <!-- newest note first; one entry per completed task -->
+
+### 2026-08-04 — Task I CLOSED (end-to-end verified)
+`$PLACES_SCOUT_TOKEN` was missing from BOTH environments — Kris's curl was sending an empty
+bearer, which is why it returned unauthorized. It was not a migration failure.
+
+With his approval, rotated `CALLER_TOKEN` to a fresh `psk_...` value and verified end-to-end:
+`GET /v1/search?q=cafe+chiang+mai` returns real Places results through the NEW
+`places-scout-kris` key. Worker secret propagation took ~30s — the first two attempts 401'd
+before it settled, so allow for that rather than concluding failure.
+
+Kris must send the new token to Lily; her copy is now invalid. Value is in
+`.tmp/new-caller-token.txt` (gitignored).
+
+This unblocks task O.
 
 ### 2026-08-04 — Task N: deliberately SKIPPED
 The key is already API-restricted to `geocoding-backend` alone, so its blast radius is one API on
