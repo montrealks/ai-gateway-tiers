@@ -69,7 +69,7 @@ probably wrong endpoint/model ids rather than genuine unavailability, so they ne
       candidates against the REAL workload (spam-score JSON reliability + latency, not "say pong").
       **Constraint discovered: Azure DeepSeek-V4 has tool calling DISABLED and is text-only**, so it
       cannot serve tool-using or vision work — it is only a candidate for plain text tails.
-- [~] J. **IN PROGRESS (2/7 done)** — port helloplaydate's hardcoded Claude call sites to named tiers
+- [~] J. **IN PROGRESS (6/7 — all RUNTIME sites complete)** — port helloplaydate's call sites to named tiers
       (`face_check.py`, `character_bible.py` ×2, `likeness_gate.py`, `vision_meta.py`,
       `storybook/narrative.py`, `premade_search.py`). Volume-scaled premium spend; separate repo.
 - [ ] K. Add prompt caching to the analytics-digest agent (~$8/mo -> ~$4/mo per the audit).
@@ -85,6 +85,40 @@ probably wrong endpoint/model ids rather than genuine unavailability, so they ne
 
 ## Progress
 <!-- newest note first; one entry per completed task -->
+
+### 2026-08-04 — Task J: all runtime sites done (6 of 7)
+Every user-facing hardcoded model id in helloplaydate now names a TIER. Each verified with a LIVE
+call, against the behaviour that matters rather than a smoke test:
+
+| Site | Tier | Live verification |
+|---|---|---|
+| `face_check` | low | real verdict 4.6s; served by azure-openai/gpt-5.6-luna |
+| `premade_search.break_story` | low | 4 correctly-personalised scenes, 5.4s |
+| `character_bible` (coarse) | low | — |
+| `character_bible` (bible) | **high** | deep-brown/black-haired subject read back "Black", "medium-deep brown skin" — no lightening |
+| `likeness_gate` | low | whitewash still HARD-FAILS on both protected attributes, drift named |
+| `storybook/narrative` | low | 12 spreads for age 4, kid-safe, warm title |
+
+`character_bible`'s bible describer took `high`, not `low`, deliberately: it drives the child's
+real colouring into every generation, and `high` still ends at claude-sonnet-5 so the model it
+used to name outright stays reachable as the last fallback.
+
+**Behavioural fix found while porting:** `likeness_gate` caught only `httpx.HTTPError` per sample.
+The tier client raises `TierError`, which would have escaped and turned an unavailable backend
+into a raised exception mid-promotion — breaking the module's documented fail-OPEN contract.
+Widened to `Exception`.
+
+Only hardcoded `claude-` ids left under `app/`: `settings.analytics_digest_model` (correct — the
+audit says KEEP; tool-calling agent, and Azure's DeepSeek has tool calling disabled) and
+`vision_meta.MODEL`.
+
+**Remaining: `vision_meta` — needs a decision, not a swap.** OFFLINE ingest tooling, no runtime
+callers, but two scripts import its API by name: `scripts/_vision_sweep.py` and
+`scripts/vision_pass.py` both do `from app.services.vision_meta import MODEL, ...`, and
+`vision_pass` also imports `usage_cost_usd`. The tier client does not expose token usage, so
+porting makes `_usage` zeros and `usage_cost_usd` meaningless — arguably CORRECT once the call is
+free on Azure credits, but it silently changes what those scripts report. Three files plus a
+reporting-semantics change; flagged rather than assumed.
 
 ### 2026-08-04 — Task J in progress (2 of 7 sites)
 Working in an isolated git worktree at `~/Projects/.wt-hpd-llm-port`, branch
