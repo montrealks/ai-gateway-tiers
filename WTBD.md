@@ -85,6 +85,40 @@ probably wrong endpoint/model ids rather than genuine unavailability, so they ne
 ## Progress
 <!-- newest note first; one entry per completed task -->
 
+### 2026-08-04 — AUDIT ROUND 3 (VPS-wide, now that the box is reachable)
+No regressions found. Everything below was tested live, not read.
+
+**Gateway consumers on the VPS — only three exist**, found by probing every running container for
+CF_AIG creds: `helloplaydate-api`, `helloplaydate-cron` (gateway `helloplaydate`) and `profilo-api`
+(gateway `profilo`). Nothing else touches the gateway.
+- `helloplaydate-api`: tier call from inside prod returns 'pong'.
+- `profilo-api`: **this is the gateway I rewrote today** (linked store_id via full-object PUT, added
+  google+azure secrets, created a dynamic route). Called it from inside its own container — returns
+  'pong'. The PUT did not drop a field.
+
+**Local tier-client consumers** `og-studio` and `familybook` import `aigw` directly (NOT vendored),
+so they resolve to the canonical client and the tiers.json I edited. Both verified: correct
+interpreter, 5 tiers, both profiles visible, live `chat('low', …)` -> 'pong'. Neither is deployed.
+
+**Swept all VPS container logs (48h) for auth/quota failures.** The initial hit list looked alarming
+(caddy 226, scraper 46, gooser 10 …) but was almost entirely FALSE POSITIVES: my pattern matched
+PORT NUMBERS in healthcheck lines — `127.0.0.1:40192` contains "401". The only genuine error is
+cnx-cinema-scraper's "SF API 403", which is SF Cinema's upstream refusing the scraper, unrelated.
+Lesson: anchor such greps, or they cry wolf.
+
+**Estate harness diff (baseline -> postaudit): NO capability regressions**, 5 improvements
+(helloplaydate/kboodle/profilo gained direct + dynamic paths), cnxlocal removed, places-scout-kris
+added. All 8 live probes green.
+
+**thai**: cannot run at all — `backend/llm/__init__.py` imports groq, which is not installed in its
+venv. Pre-existing (it also has uncommitted WIP of Kris's), local-only, not deployed. My
+GEMINI_API_KEY swap changes nothing there that was not already broken.
+
+**Still open (carried, not regressions):** kboodle prod on Bob's CF account with no BYOK key;
+route1views prod bypassing its dynamic route; family-brain provider binding (dashboard-only);
+Lyria dead estate-wide; helloplaydate port unmerged; VPS containers still hold the old dead
+GEMINI_API_KEY until next recreate.
+
 ### 2026-08-04 — Both VPS defects fixed
 
 **1. cnx-cinema scraper crash loop — root-caused and fixed, not just cleared.**
