@@ -11,6 +11,7 @@
   "azure_api_version": "2024-10-21",
   "profiles": {
     "_what_this_is": "A profile REORDERS a tier's existing chain. It never introduces a model the tier does not already list, so capability stays a property of the TIER and only the order of preference changes. Reordering is a stable sort on provider, so two steps from the same provider keep their measured order.",
+    "_not_the_only_mechanism": "This client is for local and Python work. The WordPress client sites do NOT use it — they call gateway-side DYNAMIC ROUTES, which encode the same free-first policy in Cloudflare so a PHP site gets failover with no chain logic in application code. As of 2026-08-04 route1views, kboodle, helloplaydate and profilo each run a route named `low`: gemini-3.1-flash-lite (retries 2) -> azure gpt-5.4 (retries 1) -> claude-haiku (retries 0), called as model `dynamic/low`. Keep the two mechanisms' ORDERING policy in sync even though their config lives in different places; see README for the route API's conventions.",
     "_why_not_a_tier": "`low`/`high`/`code`/`embed` name a CAPABILITY. A client site's tag suggestion needs exactly the same capability as a script's — what differs is which free pool should pay for it. That is a cost axis, not a capability axis, so it belongs in a profile.",
     "default": {
       "purpose": "internal, batch and development work",

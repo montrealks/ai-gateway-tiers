@@ -75,6 +75,51 @@ The `client` profile's premise is that Google *cannot* bill you. That is not a p
 python3 scripts/verify_free_tier.py    # selftest runs this too
 ```
 
+## Two mechanisms, one policy
+
+This repo's Python client is **not** how the WordPress sites reach a model. They use
+**gateway-side dynamic routes**, which encode the same free-first policy in Cloudflare rather
+than in application code — so a PHP site gets failover without any chain logic.
+
+| | Used by | Where the chain lives |
+|---|---|---|
+| Python tier client | local work, scripts, Python apps | `tiers.json` in this repo |
+| Gateway dynamic route | route1views, kboodle, helloplaydate, profilo | Cloudflare, per gateway |
+
+Each client gateway runs one route named `low`, called as `model: "dynamic/low"` against
+`…/{gateway}/compat/chat/completions`:
+
+```
+gemini-3.1-flash-lite (retries 2) → azure gpt-5.4 (retries 1) → claude-haiku (retries 0)
+```
+
+The retries on the first step carry real weight: the Gemini free tier binds at **15 requests
+per minute** long before its 1,500/day cap, so a short burst should wait rather than immediately
+buy tokens from the paid tail.
+
+**Working on routes via the API** — the two resources use opposite conventions, which is worth
+knowing before you go looking:
+
+```
+route:   create  POST   /ai-gateway/gateways/{gw}/routes           {"name","elements"}
+         update  POST   /ai-gateway/gateways/{gw}/routes/{id}/versions      {"elements"}
+         deploy  POST   /ai-gateway/gateways/{gw}/routes/{id}/deployments   {"version_id"}
+gateway: update  GET the config, modify it, PUT it back whole
+```
+
+`PUT` on a route 404s; `PATCH` on a gateway 404s. Note that reads return the element array under
+`data` while writes expect it under `elements`. Versions cannot be deleted, so **probe write
+endpoints on a low-stakes gateway** — a malformed experiment leaves permanent clutter on whatever
+you aimed it at. Deploying is a separate step from creating a version, so a bad version is inert
+until you promote it, and rollback is just redeploying the previous `version_id`.
+
+**A gateway must be linked to the secrets store** (`store_id`) or BYOK cannot resolve at all.
+An unlinked gateway fails outright for providers Cloudflare cannot serve itself, such as Azure.
+
+**The `cost` field in gateway logs cannot tell you who paid.** It is a list-price estimate, and it
+reads `0` for any cached response. To prove a call was genuinely free, check the request count on
+the provider-side Google project, not the gateway log.
+
 ## How it works
 
 The client POSTs an ordered **array** of attempts to the gateway's universal endpoint at `…/v1/{account}/tiers`; the gateway returns the first that succeeds.

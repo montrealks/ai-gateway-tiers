@@ -70,11 +70,34 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 - [x] L. Add google-ai-studio secrets for the helloplaydate and profilo gateways *(+ azure for profilo, + linked profilo to the secrets store)*
 - [x] M. Add Azure step + retries to route1views' `low` route *(approved by Kris)*
 - [x] N. ~~Restrict route1views' "Maps Server Key"~~ — **deliberately SKIPPED**, see note
-- [ ] O. Retire the cnxlocal project *(conditional: only after I has shown a clean week)*
-- [ ] P. Re-run the harness, diff against baseline, update README/tiers.json to match reality
+- [x] O. Retire the cnxlocal project
+- [x] P. Re-run the harness, diff against baseline, update README/tiers.json to match reality
 
 ## Progress
 <!-- newest note first; one entry per completed task -->
+
+### 2026-08-04 — Tasks O and P — PLAN COMPLETE
+**O.** Retired `cnxlocal`. Evidence: 7-day usage was 36 calls total (32 places on Aug 3, 3 on Aug 4
+which were my own audit tests, 1 geocoding on Aug 1), no reCAPTCHA or Speech usage anywhere in the
+repo, and the site itself holds no Google key — its only consumer was places-scout, now migrated.
+Three keys went with it (API key 3, Places Scout, Maps API Key); 30-day recovery window applies.
+Verified places-scout still returns 20 results AFTER the deletion, proving the migration complete.
+
+**P.** Extended the harness to probe all four client gateways on both the direct provider path and
+the dynamic route (8 probes, up from 3) — a working provider behind a broken route is still an
+outage, so the route is the probe that matters. Captured `.tmp/estate-final.json`.
+
+**Final diff vs baseline: no capability regressions, 5 improvements.**
+- new: helloplaydate + profilo gemini-direct, and kboodle/helloplaydate/profilo dynamic-low
+- unchanged: kboodle + route1views gemini-direct, route1views dynamic-low
+- projects removed: cnxlocal | added: places-scout-kris
+
+Docs updated to match reality: README gained a "Two mechanisms, one policy" section documenting
+that the Python client is for local work while the WP sites use gateway dynamic routes, plus the
+route/gateway API conventions, the store_id requirement, and the warning that the `cost` field
+cannot prove who paid. tiers.json cross-references it so the two orderings stay in sync.
+
+Smoketest green. 16/16 tasks complete.
 
 ### 2026-08-04 — Task I CLOSED (end-to-end verified)
 `$PLACES_SCOUT_TOKEN` was missing from BOTH environments — Kris's curl was sending an empty

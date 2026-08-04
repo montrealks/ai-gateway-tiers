@@ -207,16 +207,19 @@ def probe(account: str, token: str) -> dict[str, Any]:
     results: dict[str, Any] = {}
     body = {"contents": [{"parts": [{"text": "reply with the single word: pong"}]}]}
 
-    for gw in ("kboodle", "route1views"):
+    for gw in ("kboodle", "route1views", "helloplaydate", "profilo"):
         url = (f"https://gateway.ai.cloudflare.com/v1/{account}/{gw}"
                f"/google-ai-studio/v1beta/models/gemini-3.1-flash-lite:generateContent")
         results[f"{gw}:gemini-direct"] = _try(url, token, body)
 
-    results["route1views:dynamic-low"] = _try(
-        f"https://gateway.ai.cloudflare.com/v1/{account}/route1views/compat/chat/completions",
-        token,
-        {"model": "dynamic/low", "messages": [{"role": "user", "content": "say pong"}]},
-    )
+    # The dynamic route is what the sites actually call, so it is the probe that
+    # matters most — a working provider behind a broken route is still an outage.
+    for gw in ("route1views", "kboodle", "helloplaydate", "profilo"):
+        results[f"{gw}:dynamic-low"] = _try(
+            f"https://gateway.ai.cloudflare.com/v1/{account}/{gw}/compat/chat/completions",
+            token,
+            {"model": "dynamic/low", "messages": [{"role": "user", "content": "say pong"}]},
+        )
     return results
 
 
