@@ -76,6 +76,25 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 ## Progress
 <!-- newest note first; one entry per completed task -->
 
+### 2026-08-04 — Interim harness run + two harness bugs fixed
+Captured `.tmp/estate-interim.json` and diffed against baseline: **no capability regressions**,
+all three live probes still green.
+
+Fixed two bugs the run exposed:
+1. **False "NEW RISK" on any new project.** The diff compared `can_bill_for_llm` across the union
+   of projects, so an absent baseline value (`None`) never equalled `False` and always took the
+   risk branch. Now compares the intersection, and reports genuinely-new projects separately only
+   when they actually can bill for LLM.
+2. **The key heuristic conflated two axes.** Split into `api_restricted` (which APIs) and
+   `app_restricted` (which callers). A key locked to one API but usable by anyone is now surfaced
+   as "no app restriction" rather than reading as safe — which is what hid cnxlocal's API key 3.
+
+Surfaced by the fix: `earnest-vine-120619` "API key 1" is fully unrestricted (any API, any
+caller). That project is unbilled so the blast radius is bounded, but it is the last truly
+open key in the estate.
+
+Stopping here: M and N are both FLAG FIRST (route1views).
+
 ### 2026-08-04 — Task K (+ retraction of Finding 2)
 Created `low` dynamic routes on kboodle, helloplaydate and profilo:
 

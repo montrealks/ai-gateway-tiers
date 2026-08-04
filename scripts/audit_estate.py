@@ -111,14 +111,20 @@ def api_keys(project: str) -> list[dict[str, Any]]:
         targets = [t.get("service") for t in restr.get("apiTargets", []) or []]
         referrers = (restr.get("browserKeyRestrictions", {}) or {}).get("allowedReferrers", [])
         ips = (restr.get("serverKeyRestrictions", {}) or {}).get("allowedIps", [])
+        # Two independent axes. A key restricted to one API but usable from
+        # anywhere is still usable by anyone who finds it; a key locked to a
+        # domain but valid for every API is a wide blast radius on one site.
+        api_restricted = bool(targets)
+        app_restricted = bool(referrers or ips)
         keys.append({
             "uid": uid,
             "name": k.get("displayName", ""),
             "api_targets": targets,
             "allowed_referrers": referrers,
             "allowed_ips": ips,
-            # The thing worth alerting on: a key nothing constrains.
-            "unrestricted": not targets and not referrers and not ips,
+            "api_restricted": api_restricted,
+            "app_restricted": app_restricted,
+            "unrestricted": not api_restricted and not app_restricted,
         })
     return keys
 
@@ -246,7 +252,10 @@ def report(snap: dict[str, Any]) -> None:
         print(f"    {p:<32} {bill:<18} {total:>7,} req/30d{flag}")
         for k in d["api_keys"]:
             if k["unrestricted"]:
-                print(f"        {YELLOW}unrestricted key{OFF}: {k['name']}")
+                print(f"        {RED}unrestricted key{OFF}: {k['name']}  (any API, any caller)")
+            elif not k.get("app_restricted"):
+                print(f"        {YELLOW}no app restriction{OFF}: {k['name']}  "
+                      f"({len(k['api_targets'])} API(s), usable by anyone holding it)")
 
     print("\n  cloudflare gateways")
     for gw, d in snap["cloudflare"]["gateways"].items():
@@ -280,12 +289,18 @@ def diff(a: dict[str, Any], b: dict[str, Any]) -> int:
             print(f"    {DIM}unchanged{OFF}  {name}  ({now})")
 
     print("\n  billing exposure")
-    for p in sorted(set(a["google"]) | set(b["google"])):
-        wa = a["google"].get(p, {}).get("can_bill_for_llm")
-        nb = b["google"].get(p, {}).get("can_bill_for_llm")
+    # Only compare projects present in BOTH snapshots — a project that did not
+    # exist has no prior value, and `None != False` would otherwise read as a
+    # new risk when the new project is in fact clean.
+    for p in sorted(set(a["google"]) & set(b["google"])):
+        wa = bool(a["google"][p].get("can_bill_for_llm"))
+        nb = bool(b["google"][p].get("can_bill_for_llm"))
         if wa != nb:
             arrow = f"{GREEN}fixed{OFF}" if wa and not nb else f"{RED}NEW RISK{OFF}"
             print(f"    {arrow}  {p}")
+    for p in sorted(set(b["google"]) - set(a["google"])):
+        if b["google"][p].get("can_bill_for_llm"):
+            print(f"    {RED}NEW RISK{OFF}  {p} (new project, can bill for LLM)")
     gone = sorted(set(a["google"]) - set(b["google"]))
     new = sorted(set(b["google"]) - set(a["google"]))
     if gone:
