@@ -86,6 +86,40 @@ probably wrong endpoint/model ids rather than genuine unavailability, so they ne
 ## Progress
 <!-- newest note first; one entry per completed task -->
 
+### 2026-08-04 — AUDIT ROUND 2 (breakage found and FIXED)
+
+**TAILSCALE EXPLAINED — not caused by us.** The VPS peer `srv1076610` reports
+`expired=True, keyexpiry=2026-08-04T06:50:41`. Tailscale device keys expire on a schedule; this
+one came due at 06:50 UTC today and the node dropped off at 07:51. The `vps` SSH host is defined
+ONLY as the tailnet IP 100.96.57.39, so there is no SSH route until it re-authenticates. Fix:
+disable key expiry for that node in the Tailscale admin console, or run `tailscale up` via
+Hostinger's browser console. helloplaydate.com itself is unaffected (serves 200).
+
+**BROKEN BY OUR DELETIONS — both now FIXED:**
+- `~/Projects/place-scout/.env` and `~/Projects/cnxlocal/.env` both held
+  `GOOGLE_PLACES_API_KEY=…QrsuXBfo`, which was cnxlocal "API key 3" — deleted with the project.
+  Google returned "The provided API key is invalid." Repointed both to the `places-scout-kris` key
+  and verified 200 ("Fern Forest Cafe"). Backups left as `.env.bak-preswap`.
+- This ALSO solves the earlier mystery of the unknown caller making ~8 calls/30d on API key 3 —
+  it was these two tools. I flagged that unknown, narrowed the key rather than deleting it, then
+  deleted the whole project anyway. Consequence landed exactly where the flag predicted.
+
+**Systematic gateway gap — 4 gateways use Google with NO BYOK key**, so they run on Cloudflare
+unified billing rather than any free tier: `ai-album` (50/50 logs google, est $0.024 over 3
+months), `cnx-cinema` (15), `family-brain` (14), and Bob's `kboodle` (18, est $0.0076). Amounts
+are pennies, so this is a consistency problem rather than an urgent one — but none were covered by
+today's refactor.
+
+**Verified NOT broken (false alarms worth recording):**
+- route1views `R1V_GOOGLE_MAPS_API_KEY` is ALIVE — it answers "API keys with referer restrictions
+  cannot be used with this API", which is a restriction, not a deletion. A naive validity probe
+  reports restricted keys as dead; discriminate by reading the error message.
+- kboodle `KBOODLE_GOOGLE_MAPS_API_KEY` IS dead ("expired") but is the ACF map key Kris confirmed
+  unused — expected, benign.
+- The OAuth clients for kboodle and the r1v Photos Picker both still resolve at Google (302, no
+  invalid_client). The other four logins live in `pressiveweb`, which was never touched.
+- No other local .env or wp-config holds a dead Google key (swept 19 config files).
+
 ### 2026-08-04 — POST-REFACTOR AUDIT (production, not code-reading)
 Tested the live systems rather than inspecting code. Five findings, two of them serious.
 
