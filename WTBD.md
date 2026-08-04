@@ -86,6 +86,40 @@ probably wrong endpoint/model ids rather than genuine unavailability, so they ne
 ## Progress
 <!-- newest note first; one entry per completed task -->
 
+### 2026-08-04 — place-scout rewired off its own Places key
+`~/Projects/place-scout` was the second holder of a Google Places key. It now calls the shared
+places-scout Worker instead, via a new `src/utils/places-scout.js` client. Removed
+`GOOGLE_PLACES_API_KEY` from its .env; added PLACES_SCOUT_URL/TOKEN.
+
+`~/Projects/cnxlocal/.env` KEEPS its key — correct, because its only consumer is
+`workers/places-scout/src/index.ts`, i.e. the Worker itself. The proxy must hold a key; that is
+the point of it.
+
+The Worker needed extending first: place-scout always anchors a text search to a centre, and
+`/v1/search` had no location bias, so a straight swap would have returned the right words from the
+wrong city. Added optional lat/lng/radius (additive — existing callers unaffected), included in
+the cache key so a biased search cannot serve an unbiased cached result. Deployed.
+
+Verified end to end through the real modules, not just the client: `searchGooglePlaces` returned
+20 biased results, `fetchPlaceDetails` resolved the place, and **10 real photos (247KB, 218KB…)
+downloaded through the Worker's R2-cached photo proxy**.
+
+Repo conventions worth remembering: cnxlocal enforces biome + commitlint (Conventional Commits)
+via husky, and runs 8 verify scripts on every commit. My first two attempts were rejected — once
+for formatting, once for a non-conventional subject. All gates pass now.
+
+### 2026-08-04 — Tailscale: half fixed
+Kris disabled key expiry in the admin console. Confirmed effective: the peer now reports
+`expired=None, keyexpiry=None`. But it is still `online=False` with `tx 468 rx 0` — my Mac is
+sending and receiving nothing, so `tailscaled` on the VPS is not running. Disabling expiry was
+necessary but not sufficient.
+
+The VPS has NO non-Tailscale SSH route in ~/.ssh/config (only the tailnet IP), helloplaydate.com
+resolves to a fronting CDN rather than the origin, and the other known_hosts IPs are the Hostinger
+shared hosts, not the VPS. So recovery needs `tailscale up` / `systemctl start tailscaled` from
+Hostinger's browser console — Kris only. Until then the container env cannot be inspected and
+deploys are blocked.
+
 ### 2026-08-04 — Fixed 2 of the 3 broken gateways
 Added `{gateway}_google-ai-studio_default` (free-tier key) for ai-album, cnx-cinema, family-brain.
 
