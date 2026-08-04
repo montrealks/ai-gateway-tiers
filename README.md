@@ -135,7 +135,9 @@ and no cost to being late. Re-evaluate at exactly two moments:
 gcloud billing projects describe <project-id>   # billingEnabled must be false
 ```
 
-**Check the project ID, never the display name.** In July 2026 this cost $74.30. Two AI Studio projects existed whose names actively misled: `gen-lang-client-0291098513` is *displayed* as "kboodle" and is unbilled, while a separate project whose literal ID is `kboodle` had billing enabled. Nothing in the AI Studio UI distinguishes them. The spend concentrated on two days of batch work routed through a BYOK key from the billed project, and surfaced only as an invoice — there is no 429, no warning, no signal of any kind.
+**Check the project ID, never the display name.** Display names are not unique, and AI Studio names each new project after whatever you were working on at the time — so two projects with the same name and opposite billing status is easy to create by accident. In July 2026 that cost $74.30: a batch job ran through a BYOK key belonging to a billed project, and the only signal was the invoice. No 429, no warning, nothing.
+
+The unbilled project here is now named `gemini-free-tier` (ID `gen-lang-client-0291098513`) precisely so it can't be confused with the billed app project again. Verify by ID anyway.
 
 **The gateway's `cost` field cannot prove anything is free.** It's a list-price estimate that ignores hidden reasoning tokens and can understate real spend by ~8x.
 
