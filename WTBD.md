@@ -86,6 +86,39 @@ probably wrong endpoint/model ids rather than genuine unavailability, so they ne
 ## Progress
 <!-- newest note first; one entry per completed task -->
 
+### 2026-08-04 — Fixed 2 of the 3 broken gateways
+Added `{gateway}_google-ai-studio_default` (free-tier key) for ai-album, cnx-cinema, family-brain.
+
+- **ai-album — FIXED**, returns 200 'pong'.
+- **cnx-cinema — FIXED**, returns 200 'pong'. Its google path had been 0/15 succeeding since Aug 1.
+- **family-brain — STILL 403.** Diffing its gateway object against ai-album's showed `store_id`
+  EMPTY (the same defect profilo had), so I linked it to the secrets store via the GET/modify/PUT
+  dance. Still 403. The remaining difference is the PROVIDER BINDING: ai-album's error was 2041
+  ("provider is configured but its secret is missing"), proving a binding existed; family-brain has
+  none, and creating one is NOT exposed by the API (`/providers`, `/provider_keys`, `/byok`,
+  `/keys`, `/credentials` all 404 at gateway level; `/ai-gateway/providers` exists but is a
+  read-only account-level CATALOG). Adding a secret via the secrets_store API creates the secret
+  but NOT the binding — that appears to be dashboard-only.
+
+  **-> family-brain needs one manual step:** CF dashboard -> AI Gateway -> family-brain ->
+  provider keys -> add a google-ai-studio key. The secret already exists; the binding does not.
+
+  Note family-brain also has `authentication: False`, unlike the others.
+
+**TAILSCALE — cannot self-serve.** `claude-in-chrome` is NOT connected (no tools registered), and
+the `TAILSCALE_API_KEY` in the keychain is itself expired ("API token invalid" — Tailscale API keys
+expire ~90 days). Playwright/chrome-devtools run their own profiles with no Tailscale session, so
+they cannot reach the admin console. Needs either a fresh Tailscale API key (then it is one API
+call: `POST /api/v2/device/{id}/key` with `{"keyExpiryDisabled": true}`) or three clicks at
+https://login.tailscale.com/admin/machines -> srv1076610 -> ... -> Disable key expiry.
+
+**On vendor keys (Kris's challenge):** the no-vendor-keys rule covers AI INFERENCE, which is what
+the gateway proxies. Google Places is NOT an AI Gateway provider — Cloudflare does not front Maps
+Platform at all — so Places genuinely requires a direct key. The two .env files are therefore not
+policy violations. BUT the better shape is for `place-scout` and `cnxlocal` to call the
+places-scout WORKER (already proxying Places behind PLACES_SCOUT_TOKEN) instead of holding keys of
+their own. That would remove two vendor keys rather than repoint them. Not done — flagged.
+
 ### 2026-08-04 — AUDIT ROUND 2 (breakage found and FIXED)
 
 **TAILSCALE EXPLAINED — not caused by us.** The VPS peer `srv1076610` reports
