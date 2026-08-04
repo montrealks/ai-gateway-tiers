@@ -22,11 +22,13 @@ import os
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "client"))
 
 import httpx  # noqa: E402
 
-from aigw import TIERS, chat, embed  # noqa: E402
+from aigw import PROFILES, TIERS, build_chain, chat, embed  # noqa: E402
+from verify_free_tier import main as verify_free_tier  # noqa: E402
 
 PROJECT = "selftest"
 GREEN, RED, DIM, OFF = "\033[32m", "\033[31m", "\033[2m", "\033[0m"
@@ -109,6 +111,38 @@ def main() -> int:
         except Exception as e:
             failures += 1
             print(f"  {RED}FAIL{OFF} embed      {str(e)[:120]}")
+
+    # The `client` profile is what production client sites call. It inverts the
+    # Azure-first order to lead with the Google free tier, so it exercises a
+    # different first step than everything above and fails independently.
+    if "low" in wanted and "client" in PROFILES:
+        order = [s["provider"] for s in TIERS["low"]["chain"]]
+        got = [
+            "google-ai-studio" if "generateContent" in e["endpoint"] else e["provider"]
+            for e in build_chain("low", "x", profile="client")
+        ]
+        if got[0] != "google-ai-studio":
+            failures += 1
+            print(f"  {RED}FAIL{OFF} profile    client did not lead with Google: {got}")
+        elif sorted(got) != sorted(order):
+            failures += 1
+            print(f"  {RED}FAIL{OFF} profile    client changed the model set: "
+                  f"{sorted(order)} -> {sorted(got)}")
+        else:
+            try:
+                t0 = time.time()
+                out = chat("low", "Reply with exactly one word: pong",
+                           project=PROJECT, profile="client")
+                print(f"  {GREEN}ok{OFF}   profile    client {time.time()-t0:5.1f}s  "
+                      f"{out.strip()[:20]!r}  {DIM}(reorder only, same models){OFF}")
+            except Exception as e:
+                failures += 1
+                print(f"  {RED}FAIL{OFF} profile    client {str(e)[:110]}")
+
+    # The `client` profile's whole premise is that Google cannot bill us.
+    # Check it rather than trust it.
+    if verify_free_tier() != 0:
+        failures += 1
 
     time.sleep(4)  # let the gateway log settle
     answered = _who_answered()

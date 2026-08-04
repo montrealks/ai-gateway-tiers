@@ -29,11 +29,17 @@ from typing import Any
 
 import httpx
 
-__all__ = ["chat", "embed", "achat", "aembed", "build_chain", "TierError", "TIERS"]
+__all__ = [
+    "chat", "embed", "achat", "aembed", "build_chain",
+    "TierError", "TIERS", "PROFILES",
+]
 
 _SPEC = json.loads((pathlib.Path(__file__).parent.parent / "tiers.json").read_text())
 
 TIERS: dict[str, Any] = _SPEC["tiers"]
+PROFILES: dict[str, Any] = {
+    k: v for k, v in _SPEC.get("profiles", {}).items() if not k.startswith("_")
+}
 # The Azure resource name is deployment-specific, so it comes from the
 # environment rather than the spec — nothing account-shaped lives in git.
 _RESOURCE: str = os.environ.get("AZURE_RESOURCE", "")
@@ -173,6 +179,21 @@ def _element(
     }
 
 
+def _ordered(chain: list[dict[str, Any]], profile: str) -> list[dict[str, Any]]:
+    """Reorder a tier's chain by a profile's provider preference.
+
+    A profile only ever reorders — it cannot add a model the tier does not
+    already list, so the tier remains the sole definition of capability. The
+    sort is stable, so two steps from the same provider keep the order the
+    measurements put them in.
+    """
+    if profile not in PROFILES:
+        raise KeyError(f"unknown profile {profile!r}; known: {', '.join(PROFILES)}")
+    prefer = PROFILES[profile].get("prefer") or []
+    rank = {name: i for i, name in enumerate(prefer)}
+    return sorted(chain, key=lambda s: rank.get(s["provider"], len(prefer)))
+
+
 def build_chain(
     tier: str,
     prompt: str = "",
@@ -182,12 +203,13 @@ def build_chain(
     temperature: float | None = None,
     embed_input: str | None = None,
     resource: str | None = None,
+    profile: str = "default",
 ) -> list[dict[str, Any]]:
     if tier not in TIERS:
         raise KeyError(f"unknown tier {tier!r}; known: {', '.join(TIERS)}")
     return [
         _element(s, prompt, images or [], json_mode, temperature, embed_input, resource)
-        for s in TIERS[tier]["chain"]
+        for s in _ordered(TIERS[tier]["chain"], profile)
     ]
 
 
@@ -228,14 +250,21 @@ def chat(
     timeout: float = 180.0,
     account_id: str | None = None,
     token: str | None = None,
+    profile: str = "default",
 ) -> Any:
     """Run a prompt through a tier.
 
     Returns the answering model's text, or the parsed object when
     ``json_mode=True``. ``images`` are base64-encoded JPEGs.
+
+    ``profile`` reorders the tier's chain without changing which models it may
+    use. Pass ``profile="client"`` from production client sites: it leads with
+    the perpetual Google free tier instead of the expiring Azure credits. See
+    the privacy caveat in tiers.json before sending anything non-public.
     """
     chain = build_chain(
-        tier, prompt, images=images, json_mode=json_mode, temperature=temperature
+        tier, prompt, images=images, json_mode=json_mode, temperature=temperature,
+        profile=profile,
     )
     text = _extract_text(_post(chain, project, timeout, account_id, token))
     if not json_mode:
@@ -279,10 +308,12 @@ async def achat(
     timeout: float = 180.0,
     account_id: str | None = None,
     token: str | None = None,
+    profile: str = "default",
 ) -> Any:
     """Async :func:`chat`."""
     chain = build_chain(
-        tier, prompt, images=images, json_mode=json_mode, temperature=temperature
+        tier, prompt, images=images, json_mode=json_mode, temperature=temperature,
+        profile=profile,
     )
     text = _extract_text(await _apost(chain, project, timeout, account_id, token))
     if not json_mode:

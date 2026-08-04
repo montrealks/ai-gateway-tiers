@@ -53,6 +53,28 @@ failover is the property the whole design rests on, and it's invisible in normal
 
 `Kimi-K2.7-Code` is deliberately absent: its deployment capacity is 100 against 500 for `gpt-5.4` and `DeepSeek-V4-Pro`, so it saturates on real workloads and returns `finish_reason: length` with empty content.
 
+## Profiles
+
+A tier says *what capability you need*. A profile says *which free pool should pay for it*. A profile only **reorders** a tier's existing chain — it can never introduce a model the tier doesn't already list, so capability stays a property of the tier alone.
+
+```python
+chat("low", prompt)                      # default — Azure first
+chat("low", prompt, profile="client")    # Gemini free first, Azure second
+```
+
+| Profile | Order | Why |
+|---|---|---|
+| `default` | Azure → Google → Anthropic | Azure credits are free but **finite and expire ~2026-09-21**. Spend them first; unspent credit is worth nothing after that date. |
+| `client` | Google → Azure → Anthropic | The Google free tier is **perpetual and resets daily**. Production client sites must keep working past September without generating a bill, so they lean on the renewing pool. Gemini flash is also the lowest-latency option measured here, and this traffic is user-visible. |
+
+Use `client` for customer-facing microtasks on client sites — tag suggestion, short content suggestion. **Do not use it for private or client-confidential data:** free-tier inputs may be used to train Google's models. Anything sensitive belongs on the default profile, which leads with Azure.
+
+The `client` profile's premise is that Google *cannot* bill you. That is not a property of the key — it's a property of the key's Google Cloud project, and it flips silently the moment a billing account is attached for any reason, including an unrelated API like Maps. So it's checked, not documented:
+
+```bash
+python3 scripts/verify_free_tier.py    # selftest runs this too
+```
+
 ## How it works
 
 The client POSTs an ordered **array** of attempts to the gateway's universal endpoint at `…/v1/{account}/tiers`; the gateway returns the first that succeeds.
@@ -112,6 +134,8 @@ and no cost to being late. Re-evaluate at exactly two moments:
 ```bash
 gcloud billing projects describe <project-id>   # billingEnabled must be false
 ```
+
+**Check the project ID, never the display name.** In July 2026 this cost $74.30. Two AI Studio projects existed whose names actively misled: `gen-lang-client-0291098513` is *displayed* as "kboodle" and is unbilled, while a separate project whose literal ID is `kboodle` had billing enabled. Nothing in the AI Studio UI distinguishes them. The spend concentrated on two days of batch work routed through a BYOK key from the billed project, and surfaced only as an invoice — there is no 429, no warning, no signal of any kind.
 
 **The gateway's `cost` field cannot prove anything is free.** It's a list-price estimate that ignores hidden reasoning tokens and can understate real spend by ~8x.
 
