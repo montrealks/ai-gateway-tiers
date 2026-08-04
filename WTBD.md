@@ -67,7 +67,7 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 - [~] I. Migrate the places-scout Worker to the new key *(swapped + worker healthy; END-TO-END AUTH TEST PENDING — needs $PLACES_SCOUT_TOKEN)*
 - [x] J. Store Azure secrets on the kboodle and route1views gateways
 - [ ] K. Create dynamic routes on kboodle, helloplaydate and profilo gateways *(runs AFTER L — routes need the secrets)*
-- [ ] L. Add google-ai-studio secrets for the helloplaydate and profilo gateways
+- [x] L. Add google-ai-studio secrets for the helloplaydate and profilo gateways *(+ azure for profilo, + linked profilo to the secrets store)*
 - [ ] M. **FLAG FIRST** — add Azure step + retries to route1views' existing `low` route
 - [ ] N. **FLAG FIRST** — restrict route1views' unrestricted "Maps Server Key"
 - [ ] O. Retire the cnxlocal project *(conditional: only after I has shown a clean week)*
@@ -75,6 +75,23 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 
 ## Progress
 <!-- newest note first; one entry per completed task -->
+
+### 2026-08-04 — Task L (+ two findings)
+Created `helloplaydate_google-ai-studio_default`, `profilo_google-ai-studio_default` and
+`profilo_azure-openai_default`, all holding the gemini-free-tier / Azure keys.
+
+**Finding 1 — profilo's gateway had an empty `store_id`.** It was never linked to the secrets
+store, so BYOK could not work no matter what secrets existed. Fixed by PUTting the full gateway
+config with `store_id` set (PATCH is not supported on that endpoint — returns "Route not found";
+GET the config, modify, PUT it back).
+
+**Finding 2 — an unlinked gateway silently bills Cloudflare unified rather than failing.**
+Gateway logs prove it: the profilo Gemini call at 10:41:37, before linking, returned 200 with
+`cost=2e-06`. The identical call at 10:44:56, after linking, returned `cost=0`. So a missing BYOK
+key does NOT fail closed — it quietly routes to paid unified billing. Sums are trivial here, but
+this is the same silent-cost shape as the July incident and is worth encoding in the docs (task P).
+
+Back-pressure: gemini AND azure both return 200 through profilo and helloplaydate gateways.
 
 ### 2026-08-04 — Task J
 Created `kboodle_azure-openai_default` and `route1views_azure-openai_default` in the CF secrets
