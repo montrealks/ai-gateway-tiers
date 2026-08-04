@@ -64,7 +64,7 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 - [x] F. Re-enable generativelanguage on kboodle and mint its own Gemini key
 - [x] G. Repoint `kboodle_google-ai-studio_default` to kboodle's own key (stop spending Kris's quota)
 - [x] H. Create the `places-scout` project — billing, Places API, restricted key
-- [ ] I. Migrate the places-scout Worker to the new key and verify traffic moves projects
+- [~] I. Migrate the places-scout Worker to the new key *(swapped + worker healthy; END-TO-END AUTH TEST PENDING — needs $PLACES_SCOUT_TOKEN)*
 - [ ] J. Store Azure secrets on the kboodle and route1views gateways
 - [ ] K. Create dynamic routes on kboodle, helloplaydate and profilo gateways
 - [ ] L. Add google-ai-studio secrets for the helloplaydate and profilo gateways
@@ -75,6 +75,26 @@ picture to `.tmp/estate-<label>.json`. Run before and after; diff at the end.
 
 ## Progress
 <!-- newest note first; one entry per completed task -->
+
+### 2026-08-04 — Task I (partial — verification gap)
+Swapped the Worker secret `GOOGLE_PLACES_API_KEY` on `places-scout` to the new
+`places-scout-kris` key (`eb4cf64d`) via `wrangler secret put`. Wrangler needs CLOUDFLARE_API_TOKEN
+in env; read it inline from the keychain rather than exporting it.
+
+Verified: `/health` returns 200 after the swap, and `/v1/search` without a token still returns 401,
+so the worker is up and its auth gate is intact.
+
+**NOT verified end-to-end.** `$PLACES_SCOUT_TOKEN` (the shared caller token) is not in this
+environment, so an authenticated `/v1/search` could not be run. Risk is low — the same key
+returned 200 from `places:searchText` standalone, and the worker passes it via the identical
+`X-Goog-Api-Key` header — but it is unproven.
+
+To close this, Kris runs:
+    curl -s -H "Authorization: Bearer $PLACES_SCOUT_TOKEN" \
+      "https://places-scout.kristifer-szabo.workers.dev/v1/search?q=cafe+chiang+mai" | head -c 200
+
+Then confirm traffic appears on `places-scout-kris` (not `cnxlocal`) in the next harness run.
+Task O (retire cnxlocal) MUST NOT proceed until this is confirmed.
 
 ### 2026-08-04 — Task H
 Created Google project `places-scout-kris` (display name "places-scout"). The id `places-scout`
