@@ -86,6 +86,42 @@ probably wrong endpoint/model ids rather than genuine unavailability, so they ne
 ## Progress
 <!-- newest note first; one entry per completed task -->
 
+### 2026-08-04 — POST-REFACTOR AUDIT (production, not code-reading)
+Tested the live systems rather than inspecting code. Five findings, two of them serious.
+
+**1. kboodle production is on BOB'S Cloudflare account — my kboodle work had ZERO effect.**
+Production `wp-config.php` sets `KBOODLE_CF_AI_GATEWAY_ACCOUNT_ID = 1e10432c85f1e8d9866094cfd24f1777`,
+which is `Bobrohinsky@gmail.com's Account`, not Kris's. Everything I did to the `kboodle` gateway
+(BYOK google secret, azure secret, dynamic route) was applied to the gateway of the SAME NAME in
+Kris's account, which production never calls. Worse: Bob's gateway has NO google-ai-studio secret
+at all — only `fal` — so its Gemini calls run on **Cloudflare unified billing** against Bob's
+account (`cost=2e-06`, `cached=False`, real token counts). kboodle production has never been on a
+free tier. Production DOES work (verified live: returns "pong").
+
+**2. route1views production does NOT use the dynamic route, so task M does not protect it.**
+Production wp-config: `R1V_LLM_PROVIDER=google-ai-studio`, `R1V_LLM_MODEL=gemini-3.1-flash-lite` —
+NOT `compat` / `dynamic/low` as the LOCAL wp-config has. Production calls Gemini directly with NO
+fallback. The Azure step I added to the `low` route is real but unreached. Production DOES work
+(verified through its own LlmService via wp-cli: 1.66s, correct answer) and my key swap did not
+break it, since it uses `route1views_google-ai-studio_default`, which I repointed.
+
+**3. Lyria (music generation) is now DEAD estate-wide — a real capability loss.**
+`lyria-3-clip-preview` returns `429 RESOURCE_EXHAUSTED` on the free key: Lyria has no free-tier
+entitlement. And no billed project can serve it any more (swept: zero billed projects have
+generativelanguage enabled). Combination of the billed project being deleted and my machine-wide
+GEMINI_API_KEY swap. Affects `~/.claude/skills/media-use/audio/scripts/lyria-recipe.py`,
+`lib/bgm.mjs`, media-factory and video-gen BGM. Arguably the correct failure — it fails instead of
+silently billing — but it IS a lost capability and needs a decision.
+
+**4. The VPS is unreachable over Tailscale** (`dial tcp 100.96.57.39:22: i/o timeout`, last seen
+~3h). helloplaydate.com serves 200 so the app is fine, but deploys and the aigw diagnostic
+workflow are blocked. NOT caused by this refactor, but it blocks verification of the container env.
+
+**5. Clean:** cnxlocal.com live (200) with no build/runtime coupling to places-scout, so deleting
+that project was safe. places-scout worker verified end-to-end. The google secret I added to the
+helloplaydate gateway is INERT — no app code calls google-ai-studio through that gateway (all such
+log entries were my own probes), so no rate-limit regression there.
+
 ### 2026-08-04 — Task J: all runtime sites done (6 of 7)
 Every user-facing hardcoded model id in helloplaydate now names a TIER. Each verified with a LIVE
 call, against the behaviour that matters rather than a smoke test:
