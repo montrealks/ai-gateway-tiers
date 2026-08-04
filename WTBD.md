@@ -104,11 +104,28 @@ Hostinger's browser console. helloplaydate.com itself is unaffected (serves 200)
   it was these two tools. I flagged that unknown, narrowed the key rather than deleting it, then
   deleted the whole project anyway. Consequence landed exactly where the flag predicted.
 
-**Systematic gateway gap — 4 gateways use Google with NO BYOK key**, so they run on Cloudflare
-unified billing rather than any free tier: `ai-album` (50/50 logs google, est $0.024 over 3
-months), `cnx-cinema` (15), `family-brain` (14), and Bob's `kboodle` (18, est $0.0076). Amounts
-are pennies, so this is a consistency problem rather than an urgent one — but none were covered by
-today's refactor.
+**Systematic gateway gap — CORRECTED after Kris challenged it.** I claimed four gateways "run on
+Cloudflare unified billing". That was WRONG, and inferred from secret-NAMING rather than tested.
+Probing each one directly gives three DIFFERENT states:
+
+- `ai-album` -> **400, code 2041**: "Provider 'google-ai-studio' alias 'default' is configured but
+  its secret is missing from the secret store." BYOK was configured; the secret was deleted in the
+  2026-07-30 purge and the provider config left behind. 48/50 historic calls succeeded, last on
+  2026-07-25 — BROKEN since, unnoticed because it has had no traffic.
+- `cnx-cinema` -> same 2041. **0/15 google calls have succeeded** (400/401/500 back to 2026-08-01).
+  Broken for days, predating today.
+- `family-brain` -> **403 "unregistered callers"**: no provider config AND no key, so the request
+  reaches Google unauthenticated. 13/14 historic calls succeeded — a daily 22:00 job — last
+  success 2026-07-14, silent since.
+- Bob's `kboodle` -> genuinely 200 WITH cost. This one really IS on unified billing, because it has
+  no provider config at all, so Cloudflare serves it with its own key.
+
+So the real finding is worse than mis-billing: **three gateways have BROKEN Google paths**, caused
+by the 2026-07-30 BYOK purge, not by today's work — but today's work didn't fix them either, since
+it only covered tiers/route1views/kboodle/helloplaydate/profilo.
+
+Lesson: the `cost` field AND the secret-naming convention are both unreliable evidence. Probe the
+gateway and read the error code.
 
 **Verified NOT broken (false alarms worth recording):**
 - route1views `R1V_GOOGLE_MAPS_API_KEY` is ALIVE — it answers "API keys with referer restrictions
