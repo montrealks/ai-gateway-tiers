@@ -85,6 +85,44 @@ probably wrong endpoint/model ids rather than genuine unavailability, so they ne
 ## Progress
 <!-- newest note first; one entry per completed task -->
 
+### 2026-08-05 — kboodle model bakeoff: KEEP gemini-3.1-flash-lite (no change)
+Deleted Kris's now-empty `kboodle` AI Gateway (his call) — removes the two-gateways-same-name trap.
+His account is down to 10 gateways and has ZERO kboodle footprint.
+
+**Corrected my own earlier claim.** I said gemini-3.6-flash was unavailable. Half right: it is
+unavailable on the `google-ai-studio` PROXY path (unified billing only carries CF's catalogue;
+anything else is forwarded unauthenticated -> Google 403). But it IS reachable via the
+`workers-ai` provider — `compat` with model `workers-ai/google/gemini-3.6-flash` returns 200.
+Two different products: proxy-to-Google vs Cloudflare reselling the model as Workers AI.
+
+**Neurons DO have a free daily allowance** (Kris's instinct was right): a direct Workers AI call
+returns header `cf-ai-neurons: 0.95` for a trivial prompt, against a 10,000 neurons/day free tier.
+kboodle's ~25 calls/day would not come close. So the workers-ai path would be effectively free.
+
+**Bakeoff on a real event-rewrite prompt, 3 runs each, from the kboodle server on Bob's gateway:**
+
+| model | path | median | cost |
+|---|---|---|---|
+| gemini-3.1-flash-lite (current) | google-ai-studio | **1091ms** | ~0.06c/call (~$0.22/yr) |
+| gemini-3.5-flash-lite | workers-ai | 2411ms | free under neuron quota |
+| gemini-3.6-flash | workers-ai | 6827ms | free |
+
+Quality comparable across all three; 3.6 wrote the tightest copy but is **6.3x slower**.
+
+**Decision: keep gemini-3.1-flash-lite. No change.**
+- Kris's own criterion was "faster wins, cost is inconsequential" — the current model IS the
+  fastest, by 2.2x and 6.3x.
+- The deprecation worry does not apply: 3.1-flash-lite is ALREADY the newest lite model the
+  unified-billing proxy path carries (others: 2.5-flash, 2.5-flash-lite, 3-flash-preview,
+  3.1-pro-preview — all older or heavier).
+- Switching to a workers-ai model needs a THIRD provider branch in `LLMService` (its `match` has
+  only openai/gemini, and the gemini branch builds Gemini-native `:generateContent`, not the
+  OpenAI-shaped compat path). Real code change in a client's production, to go slower.
+
+When 3.1-flash-lite is eventually deprecated it is a ONE-LINE change in
+`src/Config/config.php` to another google-ai-studio model. Worth knowing then: the workers-ai
+path exists, is free under quota, and carries newer models — at a latency cost.
+
 ### 2026-08-05 — kboodle SEVERED from Kris's resources (client owns its stack)
 Decision: the client now pays for all of kboodle's AI, so none of Kris's free credits (Azure or
 Google free tier) should touch it, and the tier/free-tier machinery is not worth the complexity
