@@ -95,9 +95,19 @@ anything else is forwarded unauthenticated -> Google 403). But it IS reachable v
 `workers-ai` provider — `compat` with model `workers-ai/google/gemini-3.6-flash` returns 200.
 Two different products: proxy-to-Google vs Cloudflare reselling the model as Workers AI.
 
-**Neurons DO have a free daily allowance** (Kris's instinct was right): a direct Workers AI call
-returns header `cf-ai-neurons: 0.95` for a trivial prompt, against a 10,000 neurons/day free tier.
-kboodle's ~25 calls/day would not come close. So the workers-ai path would be effectively free.
+**Neurons — DO NOT bank on the "free quota" story. Not established.** A DIRECT Workers AI call to
+a CF-native model (`@cf/google/gemma-4-26b-a4b-it`) does return `cf-ai-neurons: 0.95` and shows up
+in `aiInferenceAdaptiveGroups`. But the `workers-ai/google/gemini-*` calls made THROUGH the gateway
+register **zero neurons** in that analytics feed and show **cost=0** in the gateway log. Two
+different meters both reading nothing is "not measured", not "free" — and tiers.json already warns
+the cost field cannot prove anything is free. Partner models may bill on a lane not yet surfaced.
+
+**Token counts expose a bigger problem with 3.6-flash.** On a trivial prompt:
+`gemini-3.5-flash-lite` 79in/61out, `gemini-3.1-flash-lite` 80in/68out, but
+**`gemini-3.6-flash` 79in/1147out** — ~17x the billable output, because it is a THINKING model
+emitting reasoning that never reaches the user. That is the 6.8s latency, and it means 3.6-flash
+would be the MOST expensive option the moment that path is metered, not the cheapest. Same trap
+tiers.json documents for DeepSeek V4.
 
 **Bakeoff on a real event-rewrite prompt, 3 runs each, from the kboodle server on Bob's gateway:**
 
