@@ -32,7 +32,49 @@ Three tasks mirroring real call sites, 3 reps each, on Kris's own account:
 
 Neurons read from the `cf-ai-neurons` response header, not estimated.
 
-## Results (2026-08-05)
+## The toy-task trap (read this first)
+
+The first run of this bakeoff used a 50-word event blurb and a 3-field extraction.
+It ranked `llama-3.2-3b` the outright winner. **That result was worthless**, and
+Kris caught it: the real call sites send a full post plus a 65-term taxonomy and
+demand 1-3 choices drawn only from that list.
+
+Adding the REAL route1views categoriser reversed the ranking. On the real task
+`llama-3.2-3b` scores **1/3** — it invents categories that are not in the
+taxonomy ("Route 1", "Food", "Travel") and ignores the 1-3 limit, returning up
+to NINE. Neither failure is visible on a toy prompt.
+
+**Never rank a model on a prompt smaller than the real one.**
+
+## Results — REAL task (2026-08-05)
+
+The `categorize` task is lifted verbatim from
+`CreatorController::getCategorySuggestions`: same wording, same live 65-term
+taxonomy, same JSON contract. Pass = valid JSON, 1-3 entries, every entry drawn
+from the taxonomy.
+
+| model | categorize | median | neurons | verdict |
+|---|---|---|---|---|
+| **gemini-3.1-flash-lite** *(production yardstick, paid)* | **5/5** | 1188ms | — | the bar |
+| **meta/llama-4-scout-17b-16e-instruct** | **3/3** | **1053ms** | 13.4 | **matches production** |
+| mistralai/mistral-small-3.1-24b-instruct | 3/3 | 1187ms | 16.8 | equal, slightly pricier |
+| meta/llama-3.3-70b-instruct-fp8-fast | 3/3 | 2056ms | 22.5 | fine, 2x slower |
+| qwen/qwen3-30b-a3b-fp8 | 3/3 | 5242ms | 15.0 | too slow for a UI path |
+| meta/llama-3.2-3b-instruct | **1/3** | 1011ms | 3.3 | **invents categories** |
+
+Sensible agreement between the good models: everything that passed chose
+"Diners & Dives" plus "New Jersey" and/or "Route 1 Before the Interstates" —
+the same picks production Gemini makes.
+
+### Recommendation
+
+`@cf/meta/llama-4-scout-17b-16e-instruct` is the neuron model to reach for. It
+matched the production model on both reliability and latency, at ~13.4 neurons
+for a categorise call — roughly **745 free categorise calls/day** inside the
+10k allowance, and this account is on the paid Workers plan so it bills past
+that rather than failing.
+
+## Results — toy tasks (kept for contrast)
 
 | model | reliability | median | neurons | verdict |
 |---|---|---|---|---|

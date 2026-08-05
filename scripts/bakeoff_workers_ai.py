@@ -57,6 +57,52 @@ EVENT_TEXT = (
     "have them, coffee provided, all ages welcome, rain or shine"
 )
 
+# --- the REAL route1views categoriser -----------------------------------------
+# Lifted verbatim from CreatorController::getCategorySuggestions — same wording,
+# same 65-term live taxonomy, same "JSON object with a categories array" contract.
+# This is the task that matters: choose 1-3 of 65 near-miss options and invent
+# nothing. A toy 3-field extraction does not exercise that at all.
+R1V_CATEGORIES = [
+    "250 Years of Independence", "Abandoned Buildings", "Agriculture", "Architecture",
+    "Automotive", "Bars and Saloons", "BBQ", "Beaches", "Bridges", "Capitals",
+    "Cemetery", "Charities", "Community Giving", "Connecticut", "Creepy Crawly",
+    "Diners & Dives", "Disasters", "Faces", "Fall Lines", "Finance, Currency Trading",
+    "Fishing", "Flag Day", "Florida", "Gearheads", "Georgia", "Guide", "History",
+    "Inventions On Rt 1", "Maine", "Malls", "Maryland", "Massachusetts", "Memorial",
+    "Museums", "Music", "Nature", "New Hampshire", "New Jersey", "New York",
+    "North Carolina", "Nostalgia", "Off The Path", "On The Set", "Parks Zoos",
+    "Pennsylvania", "People", "Public Art", "Re", "Restaurants & Diners",
+    "Retro/Nostalgia", "Reviews", "Revolutionary War", "Rhode Island",
+    "Roadside Attractions", "Route 1 Before the Interstates", "Signs",
+    "South Carolina", "Space Exploration", "Sports", "Technology", "Theaters",
+    "Vernacular", "Virginia", "Visual Arts", "Washington, DC", "Words",
+]
+
+# A realistic submission: a roadside-diner post with several plausible-but-wrong
+# neighbours in the taxonomy (BBQ, Nostalgia, Retro/Nostalgia, Signs, Automotive).
+R1V_POST = (
+    "The Blue Star Diner has sat on the northbound side of Route 1 in Woodbridge, "
+    "New Jersey since 1948. It is a Jerry O'Mahony car — stainless steel ribbing, "
+    "a barrel roof, and the original porcelain enamel still under the 1970s siding "
+    "somebody bolted on. The neon sign out front lost its star in a 1994 ice storm "
+    "and was rebuilt from the original drawings by a shop in Trenton. Inside, the "
+    "counter seats fourteen and the booths are the same Naugahyde they installed "
+    "when Truman was president. They still make the gravy from scratch and the pie "
+    "case rotates. Truckers have been stopping here since before the Turnpike took "
+    "the through traffic away, and the regulars will tell you the parking lot used "
+    "to back up onto the highway on a Friday night. The current owners are the "
+    "third family to run it and they have resisted every offer to sell the land."
+)
+
+R1V_PROMPT = (
+    "You are categorizing travel/location content. Given this post content, suggest "
+    "1-3 categories that best match. Only choose from these available categories: "
+    + ", ".join(R1V_CATEGORIES)
+    + '. Return ONLY a JSON object with a "categories" array of category names. '
+    "If the content doesn't match any categories well, return an empty array. "
+    f'Post content: "{R1V_POST}"'
+)
+
 # Facts genuinely present in EVENT_TEXT. Anything a model adds beyond these is
 # fabrication, which is the failure mode that matters for event extraction.
 EXPECTED_BRING = {"gloves", "rakes"}
@@ -92,6 +138,14 @@ TASKS: dict[str, dict[str, Any]] = {
                 "reason": {"type": "string"},
             },
             "required": ["score", "is_spam", "reason"],
+        },
+    },
+    "categorize": {
+        "prompt": R1V_PROMPT,
+        "schema": {
+            "type": "object",
+            "properties": {"categories": {"type": "array", "items": {"type": "string"}}},
+            "required": ["categories"],
         },
     },
     "rewrite": {
@@ -193,6 +247,18 @@ def score(task_name: str, obj: Any, text: str) -> tuple[bool, str]:
         if extra:
             return False, f"invented {sorted(extra)[:2]}"
         return True, "faithful"
+
+    if task_name == "categorize":
+        cats = obj.get("categories")
+        if not isinstance(cats, list):
+            return False, "no categories array"
+        if not (1 <= len(cats) <= 3):
+            return False, f"returned {len(cats)}, wanted 1-3"
+        valid = {c.lower() for c in R1V_CATEGORIES}
+        invented = [c for c in cats if str(c).lower() not in valid]
+        if invented:
+            return False, f"INVENTED {invented[:2]}"
+        return True, ", ".join(str(c) for c in cats)
 
     if task_name == "classify":
         if not all(k in obj for k in ("score", "is_spam", "reason")):
