@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Cloudflare Workers AI — measured bakeoff for the post-Azure chain
-description: "Which neuron-billed open-weight models can actually take over a tier when the Microsoft credits expire (~2026-09-21). Verdict: llama-3.2-3b-instruct wins on every axis; the big reasoning models are the least reliable."
+description: "Which neuron-billed open-weight models can actually take over a tier when the Microsoft credits expire (~2026-09-21). Verdict on the REAL task: llama-4-scout-17b matches production gemini-3.1-flash-lite; llama-3.2-3b looks best on toy prompts and fails on real ones."
 tags: [llm, workers-ai, neurons, cost, tiers, bakeoff]
 timestamp: 2026-08-05T00:00:00Z
 status: active
@@ -91,10 +91,11 @@ that rather than failing.
 
 ## What to take from it
 
-**Smaller beat bigger, decisively.** `llama-3.2-3b` was the most reliable, the
-fastest, and the cheapest — 34x cheaper than gemma-4-26b and 15x cheaper than
-gemma on latency, at 100% vs 100%. There is no reason to reach past it for
-extract/classify/rewrite work.
+**Size only stops mattering once the task is trivial.** On toy prompts the 3B
+model topped the table; on the real 65-category task it was the only model that
+failed. The toy result was measuring formatting, not capability. Where a real
+constraint exists — a closed vocabulary, a count limit — capacity starts to tell,
+and `llama-4-scout-17b` is the smallest model here that holds it.
 
 **The reasoning models are the trap.** `gpt-oss-20b` scored **0%** and
 `gpt-oss-120b` 44%. They spend their completion budget thinking and then return
@@ -108,10 +109,11 @@ billed, invisible, and here they also break the contract.
 
 **Speed labels lie.** `glm-4.7-flash` was the second-slowest model tested.
 
-**Free headroom.** At 1.64 neurons/call and a 10,000 neurons/day allowance,
-`llama-3.2-3b` gives **~6,100 free calls/day** — more than this whole estate uses.
-Kris is on the **paid** Workers plan, so past the allowance it bills rather than
-stops.
+**Free headroom.** At ~13.4 neurons for a real categorise call against a 10,000
+neurons/day allowance, `llama-4-scout-17b` gives roughly **745 free calls/day** —
+still comfortably above this estate's usage. Kris is on the **paid** Workers plan,
+so past the allowance it bills rather than stops. (The 1.64 neurons/call figure
+for `llama-3.2-3b` only applies to the toy prompts it passed.)
 
 ## Caveats
 
@@ -128,7 +130,8 @@ stops.
 
 Chain order for a post-credits `low` would be:
 
-    google-ai-studio (free tier) -> workers-ai llama-3.2-3b -> anthropic (paid)
+    google-ai-studio (free tier) -> workers-ai llama-4-scout-17b -> anthropic (paid)
 
 Two free steps before anything bills, and the middle step is fast enough
-(693ms) to sit on a user-facing path.
+(1053ms — faster than the production model it would be standing in for) to sit
+on a user-facing path.
