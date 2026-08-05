@@ -85,6 +85,41 @@ probably wrong endpoint/model ids rather than genuine unavailability, so they ne
 ## Progress
 <!-- newest note first; one entry per completed task -->
 
+### 2026-08-05 — kboodle SEVERED from Kris's resources (client owns its stack)
+Decision: the client now pays for all of kboodle's AI, so none of Kris's free credits (Azure or
+Google free tier) should touch it, and the tier/free-tier machinery is not worth the complexity
+for a site spending ~1.5 cents/day.
+
+**Production was ALREADY where we wanted it** — Bob's CF account (1e10432c…), unified billing, no
+BYOK Google key. Local wp-config points at Bob's account too. So nothing needed changing on the
+client side; what was wrong was yesterday's leftovers in KRIS's account.
+
+Deleted from Kris's account: `kboodle_google-ai-studio_default`, **`kboodle_azure-openai_default`
+(this held KRIS's Azure key — the actual free-credit leak)**, `kboodle_fal_default`, and the `low`
+dynamic route. Deleted the Gemini API key from the `kboodle` Google project.
+Result: kboodle's footprint in Kris's account is NONE; the kboodle Google project is unbilled with
+zero keys.
+
+Production verified still working after every deletion (http=200).
+
+**Model finding — gemini-3.6-flash is NOT usable here.** Measured against Bob's gateway from the
+kboodle server. Cloudflare unified billing only serves models in ITS catalogue; anything else is
+forwarded unauthenticated and Google returns 403 "unregistered callers":
+- WORKS: gemini-3.1-flash-lite (current), gemini-2.5-flash, gemini-2.5-flash-lite,
+  gemini-3-flash-preview, gemini-3.1-pro-preview
+- 403: gemini-3.5-flash, **gemini-3.6-flash**
+Keep `gemini-3.1-flash-lite`. Cheapest supported tier, 2.1s on a real event-rewrite prompt, good
+copy. Measured cost ~$0.0006/call (0.06 cents) — Kris's "half a penny" estimate was ~8x high.
+
+**kboodle's AI surface is THREE features, not two** (Kris expected two):
+`EventSuggestionsService` (improve event descriptions), `AiHelpConversationService` (conversational
+event editing), and **`LifeStoryEventsSuggestionsService`** (suggest events to add to life stories).
+
+**Left in place deliberately:** the now-empty `kboodle` gateway in Kris's account. It holds
+historical logs that could matter in a billing question about pre-handover usage. Note it is the
+naming trap that cost an hour yesterday — two gateways called `kboodle` in two accounts — so if
+that history is ever judged worthless, delete it.
+
 ### 2026-08-04 — AUDIT ROUND 3 (VPS-wide, now that the box is reachable)
 No regressions found. Everything below was tested live, not read.
 
