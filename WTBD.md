@@ -85,6 +85,41 @@ probably wrong endpoint/model ids rather than genuine unavailability, so they ne
 ## Progress
 <!-- newest note first; one entry per completed task -->
 
+### 2026-08-05 — Workers AI capability audit (Kris's own account, PAID Workers plan)
+Kris's account CAN use Workers AI and has NEVER used it (zero lifetime neurons). 61 models. Paid
+plan, so past the 10k neurons/day allowance it bills rather than stops.
+
+**Measured neuron cost (real calls, `cf-ai-neurons` header):**
+
+| use | model | neurons | free calls/day |
+|---|---|---|---|
+| embeddings | bge-m3 (1024d) | 0.01 | ~1,000,000 |
+| small text | llama-3.2-3b-instruct | 1.44 | ~6,900 |
+| big text | gpt-oss-120b | 17.7-21.5 | ~500 |
+
+**Embedding dims — no drop-in.** All 7 embedding models measured: bge-m3 1024, qwen3 1024,
+plamo 2048, bge-small 384, bge-base 768, embeddinggemma 768, bge-large 1024. **None is 1536**,
+which is what the `embed` tier (Azure text-embedding-3-small) produces and what
+premade_search's embeddings.npy stores. Switching = re-embedding the corpus. Worth planning
+BEFORE Azure credits expire ~2026-09-21, after which embeddings start costing money.
+
+**gpt-oss-120b capability tests:**
+- structured JSON via `response_format: json_schema` — SUPPORTED, parses strictly.
+- tool calling — **SUPPORTED**, proper OpenAI-shaped `tool_calls` with correct args. Notable: the
+  helloplaydate digest audit kept Sonnet because Azure's DeepSeek has tool calling DISABLED. This
+  does not, so it is a live candidate there.
+- **BUT unreliable for structured extraction: 1/3 runs succeeded.** It is a REASONING model —
+  spent 232 completion tokens on a two-field extraction, and when reasoning exhausts the budget it
+  returns `content: null`. Also embellished heavily when unconstrained (invented "Oakwood Park",
+  "a smile", a specific date/timezone from text that contained none of it).
+- `llama-3.2-3b-instruct` was **3/3 faithful** on the same task at 1/12th the neurons and 0.8s.
+  For structured/faithful work the SMALL model beat the big one on both reliability and cost.
+
+**Takeaway:** the catalogue is open-weight (llama, gemma, qwen, mistral, gpt-oss, flux, whisper,
+deepgram) — capable, not frontier. Best fits: embeddings (essentially free forever), cheap
+faithful extraction on llama-3.2-3b, and a free chain step ahead of the paid tail after September.
+Do NOT reach for gpt-oss-120b for JSON extraction without retry handling.
+
 ### 2026-08-05 — kboodle model bakeoff: KEEP gemini-3.1-flash-lite (no change)
 Deleted Kris's now-empty `kboodle` AI Gateway (his call) — removes the two-gateways-same-name trap.
 His account is down to 10 gateways and has ZERO kboodle footprint.
