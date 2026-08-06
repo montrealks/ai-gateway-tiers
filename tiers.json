@@ -15,12 +15,20 @@
     "_why_not_a_tier": "`low`/`high`/`code`/`embed` name a CAPABILITY. A client site's tag suggestion needs exactly the same capability as a script's — what differs is which free pool should pay for it. That is a cost axis, not a capability axis, so it belongs in a profile.",
     "default": {
       "purpose": "internal, batch and development work",
-      "prefer": ["azure-openai", "google-ai-studio", "anthropic"],
+      "prefer": [
+        "azure-openai",
+        "google-ai-studio",
+        "anthropic"
+      ],
       "rationale": "Azure credits are free but FINITE and expire ~2026-09-21. Spend them first — unspent credit is worth nothing after that date."
     },
     "client": {
       "purpose": "customer-facing microtasks on production client sites — tag suggestion, short content suggestion (kboodle, route1views)",
-      "prefer": ["google-ai-studio", "azure-openai", "anthropic"],
+      "prefer": [
+        "google-ai-studio",
+        "azure-openai",
+        "anthropic"
+      ],
       "rationale": "Inverts the Azure-first policy on purpose. The Google free tier is PERPETUAL and resets daily; Azure credits are finite and expire ~2026-09-21. Client sites must keep working past that date without generating a bill, so they should lean on the renewing pool and leave the expiring one for batch work. Gemini flash is also the lowest-latency option measured here, and this traffic is user-visible.",
       "requires_free_tier": true,
       "_precondition": "Only valid while the stored AI Studio key belongs to a project with NO billing account. scripts/verify_free_tier.py asserts this; selftest runs it."
@@ -84,6 +92,12 @@
           "provider": "azure-openai",
           "model": "DeepSeek-V4-Flash",
           "cost": "free (MS credits)"
+        },
+        {
+          "provider": "azure-openai",
+          "model": "FW-Kimi-K3",
+          "cost": "free (MS credits)",
+          "note": "500k TPM / 500 RPM of its own — the Fireworks quota bucket, separate from the DeepSeek and gpt-5.x ones, so it adds real headroom when Flash throttles rather than competing for the same tokens"
         },
         {
           "provider": "azure-openai",
