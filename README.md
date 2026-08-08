@@ -84,15 +84,19 @@ than in application code — so a PHP site gets failover without any chain logic
 | | Used by | Where the chain lives |
 |---|---|---|
 | Python tier client | local work, scripts, Python apps | `tiers.json` in this repo |
-| Gateway dynamic route | route1views, profilo, cnx-cinema (the WordPress client sites) | Cloudflare, per gateway |
+| Gateway dynamic route | route1views, profilo (WordPress client sites) | Cloudflare, per gateway |
 | App-owned resolver | helloplaydate | its own `app/services/ai_gateway.py` |
 
-Each **WordPress client** gateway runs one route named `low`, called as `model: "dynamic/low"`
-against `…/{gateway}/compat/chat/completions`:
+**Live route inventory, read off the Cloudflare API 2026-08-08** — this is the whole of it:
 
-```
-gemini-3.1-flash-lite (retries 2) → azure gpt-5.4 (retries 1) → claude-haiku (retries 0)
-```
+| Gateway | Route | Chain |
+|---|---|---|
+| route1views | `low` | `google/gemini-3.1-flash-lite` (r2) → `azure/gpt-5.4` (r1) → `anthropic/claude-haiku-4-5` (r0) |
+| profilo | `low` | identical to route1views |
+| cnx-cinema | `gemini-flash-lite` | `google/gemini-3.1-flash-lite` (r2) — **one step, and NOT named `low`** |
+| tiers, helloplaydate, default, flavor-wheel-pro, ai-album, place-scout, family-brain | — | no routes |
+
+`low` is called as `model: "dynamic/low"` against `…/{gateway}/compat/chat/completions`.
 
 The retries on the first step carry real weight: the Gemini free tier binds at **15 requests
 per minute** long before its 1,500/day cap, so a short burst should wait rather than immediately
@@ -106,14 +110,21 @@ Azure credits, which is exactly what the `client` **profile** expresses for Pyth
 it means the two mechanisms share a POLICY GOAL (free first), not a chain. Only the goal is
 common; check both when you change either.
 
-Three corrections to the older version of this table, all verified 2026-08-08:
+Corrections to the older version of this table, all read off the live API on 2026-08-08:
 
-- **`kboodle` has no gateway at all.** The estate probe was asking for one that does not exist.
+- **`kboodle` has no gateway at all** — `GET /ai-gateway/gateways/kboodle` returns error 7002, and
+  it is absent from the account's gateway list (`default, route1views, ai-album, cnx-cinema,
+  flavor-wheel-pro, place-scout, family-brain, helloplaydate, profilo, tiers`). `scripts/audit_estate.py`
+  was probing a gateway that does not exist.
+- **cnx-cinema's route is not `low`.** It is a single-step route named `gemini-flash-lite`, so a
+  caller asking for `dynamic/low` on that gateway gets nothing. Earlier text here claimed it ran
+  `low`; that was never true.
 - **helloplaydate never used a dynamic route.** It resolves its own chain client-side against the
   universal endpoint on its own gateway, because the shared `tiers` gateway's `cf-aig-metadata`
   carries only `{"project": …}` and it needs per-user spend attribution. The stray `low` route
   that had been provisioned on its gateway was never called by any code path and has been
-  **deleted**. See `helloplaydate/docs/decisions/2026-08-07-llm-tier-resolver-in-app.md`.
+  **deleted** — the gateway now reads back with zero routes. See
+  `helloplaydate/docs/decisions/2026-08-07-llm-tier-resolver-in-app.md`.
 - **The `tiers` gateway itself has no routes** — which is correct, not a gap: this client only
   ever POSTs the universal endpoint.
 

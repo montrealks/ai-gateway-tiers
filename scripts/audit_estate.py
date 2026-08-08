@@ -32,7 +32,10 @@ ROOT = pathlib.Path(__file__).parent.parent
 OUT = ROOT / ".tmp"
 GREEN, RED, YELLOW, DIM, OFF = "\033[32m", "\033[31m", "\033[33m", "\033[2m", "\033[0m"
 
-GATEWAYS = ["tiers", "route1views", "kboodle", "helloplaydate", "profilo", "default"]
+# `kboodle` is DELIBERATELY ABSENT (2026-08-08): that gateway does not exist —
+# GET /ai-gateway/gateways/kboodle returns error 7002 and it is not in the
+# account's gateway list. Probing it produced a permanent phantom failure.
+GATEWAYS = ["tiers", "route1views", "cnx-cinema", "helloplaydate", "profilo", "default"]
 
 
 def sh(*args: str, timeout: int = 120) -> str:
@@ -207,7 +210,7 @@ def probe(account: str, token: str) -> dict[str, Any]:
     results: dict[str, Any] = {}
     body = {"contents": [{"parts": [{"text": "reply with the single word: pong"}]}]}
 
-    for gw in ("kboodle", "route1views", "helloplaydate", "profilo"):
+    for gw in ("route1views", "cnx-cinema", "helloplaydate", "profilo"):
         url = (f"https://gateway.ai.cloudflare.com/v1/{account}/{gw}"
                f"/google-ai-studio/v1beta/models/gemini-3.1-flash-lite:generateContent")
         results[f"{gw}:gemini-direct"] = _try(url, token, body)
@@ -224,7 +227,11 @@ def probe(account: str, token: str) -> dict[str, Any]:
     # Google-first chain that CONTRADICTED the app's own `low` — so it was
     # deleted. Do not re-add it here or on the gateway. See
     # helloplaydate/docs/decisions/2026-08-07-llm-tier-resolver-in-app.md.
-    for gw in ("route1views", "kboodle", "profilo"):
+    # Only route1views and profilo actually have a route NAMED `low` (verified
+    # against the live API 2026-08-08). cnx-cinema's route is a one-step route
+    # named `gemini-flash-lite`, so `dynamic/low` would 404 there; kboodle has
+    # no gateway at all.
+    for gw in ("route1views", "profilo"):
         results[f"{gw}:dynamic-low"] = _try(
             f"https://gateway.ai.cloudflare.com/v1/{account}/{gw}/compat/chat/completions",
             token,
