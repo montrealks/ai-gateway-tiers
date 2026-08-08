@@ -84,10 +84,11 @@ than in application code — so a PHP site gets failover without any chain logic
 | | Used by | Where the chain lives |
 |---|---|---|
 | Python tier client | local work, scripts, Python apps | `tiers.json` in this repo |
-| Gateway dynamic route | route1views, kboodle, helloplaydate, profilo | Cloudflare, per gateway |
+| Gateway dynamic route | route1views, profilo, cnx-cinema (the WordPress client sites) | Cloudflare, per gateway |
+| App-owned resolver | helloplaydate | its own `app/services/ai_gateway.py` |
 
-Each client gateway runs one route named `low`, called as `model: "dynamic/low"` against
-`…/{gateway}/compat/chat/completions`:
+Each **WordPress client** gateway runs one route named `low`, called as `model: "dynamic/low"`
+against `…/{gateway}/compat/chat/completions`:
 
 ```
 gemini-3.1-flash-lite (retries 2) → azure gpt-5.4 (retries 1) → claude-haiku (retries 0)
@@ -96,6 +97,25 @@ gemini-3.1-flash-lite (retries 2) → azure gpt-5.4 (retries 1) → claude-haiku
 The retries on the first step carry real weight: the Gemini free tier binds at **15 requests
 per minute** long before its 1,500/day cap, so a short burst should wait rather than immediately
 buy tokens from the paid tail.
+
+**These routes are NOT kept in sync with `tiers.json`, and saying they are was wrong.** The
+deployed route is **Google-first** (`gemini-3.1-flash-lite → gpt-5.4 → haiku`) while this repo's
+`low` is **Azure-first** (`gpt-5.6-luna → gpt-5.4 → gemini → haiku`). That divergence is
+deliberate — a PHP site should lean on the *perpetual* Google free tier rather than the expiring
+Azure credits, which is exactly what the `client` **profile** expresses for Python callers — but
+it means the two mechanisms share a POLICY GOAL (free first), not a chain. Only the goal is
+common; check both when you change either.
+
+Three corrections to the older version of this table, all verified 2026-08-08:
+
+- **`kboodle` has no gateway at all.** The estate probe was asking for one that does not exist.
+- **helloplaydate never used a dynamic route.** It resolves its own chain client-side against the
+  universal endpoint on its own gateway, because the shared `tiers` gateway's `cf-aig-metadata`
+  carries only `{"project": …}` and it needs per-user spend attribution. The stray `low` route
+  that had been provisioned on its gateway was never called by any code path and has been
+  **deleted**. See `helloplaydate/docs/decisions/2026-08-07-llm-tier-resolver-in-app.md`.
+- **The `tiers` gateway itself has no routes** — which is correct, not a gap: this client only
+  ever POSTs the universal endpoint.
 
 **Working on routes via the API** — the two resources use opposite conventions, which is worth
 knowing before you go looking:
