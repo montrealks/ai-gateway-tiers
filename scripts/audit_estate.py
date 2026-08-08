@@ -214,7 +214,17 @@ def probe(account: str, token: str) -> dict[str, Any]:
 
     # The dynamic route is what the sites actually call, so it is the probe that
     # matters most — a working provider behind a broken route is still an outage.
-    for gw in ("route1views", "kboodle", "helloplaydate", "profilo"):
+    #
+    # helloplaydate is DELIBERATELY ABSENT (2026-08-08). It is a Python app, not a
+    # WordPress site: it resolves its own tier chain client-side against the
+    # universal endpoint, because a dynamic route has nowhere to put Azure's
+    # resource name or api-version and Azure-first IS the policy while the
+    # Microsoft credits last. Its `low` route was provisioned by the 2026-08-04
+    # estate sweep, was never called by anything but this probe, and carried a
+    # Google-first chain that CONTRADICTED the app's own `low` — so it was
+    # deleted. Do not re-add it here or on the gateway. See
+    # helloplaydate/docs/decisions/2026-08-07-llm-tier-resolver-in-app.md.
+    for gw in ("route1views", "kboodle", "profilo"):
         results[f"{gw}:dynamic-low"] = _try(
             f"https://gateway.ai.cloudflare.com/v1/{account}/{gw}/compat/chat/completions",
             token,
