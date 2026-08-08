@@ -1,6 +1,6 @@
 # ai-gateway-tiers
 
-**Ask for a capability tier, never a model.** Every app names `low`, `high`, `offload`, `code` or `embed`; this repo owns what those resolve to.
+**Ask for a capability tier, never a model.** Every app names `low`, `high`, `bulk`, `code` or `embed`; this repo owns what those resolve to.
 
 Azure leads every tier — Microsoft-for-Startups credits are free until ~2026-09-21, and there is more credit than can be spent before then. Each tier falls back to a *second Azure model* before it will consider anything that costs money.
 
@@ -45,11 +45,11 @@ failover is the property the whole design rests on, and it's invisible in normal
 |---|---|---|
 | `low` | classify, tag, extract, short generation | Azure gpt-5.6-luna → Azure gpt-5.4 → Gemini free → Claude Haiku |
 | `high` | reasoning, structured extraction | Azure gpt-5.4 → Azure gpt-5.6-terra → Gemini free → Claude Sonnet |
-| `offload` | bulk / deterministic / dev work | Azure DeepSeek-V4-Flash → Azure DeepSeek-V4-Pro → Azure gpt-5.4 |
+| `bulk` | bulk / deterministic / dev work | Azure DeepSeek-V4-Flash → Azure FW-Kimi-K3 → Azure DeepSeek-V4-Pro → Azure gpt-5.4 |
 | `code` | code-heavy / agentic | Azure gpt-5.4 → Azure DeepSeek-V4-Flash |
 | `embed` | embeddings, 1536-dim | Azure text-embedding-3-small |
 
-`offload` and `code` are **Azure-only by design** — they fail rather than escalate to a paid provider.
+`bulk` and `code` are **Azure-only by design** — they fail rather than escalate to a paid provider.
 
 `Kimi-K2.7-Code` is deliberately absent: its deployment capacity is 100 against 500 for `gpt-5.4` and `DeepSeek-V4-Pro`, so it saturates on real workloads and returns `finish_reason: length` with empty content.
 

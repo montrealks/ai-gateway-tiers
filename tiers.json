@@ -85,7 +85,7 @@
         }
       ]
     },
-    "offload": {
+    "bulk": {
       "purpose": "bulk / deterministic / dev work — mass codemods, batch analysis, large JSON. AZURE ONLY: this lane must never cost money, so it fails rather than escalating to a paid provider.",
       "chain": [
         {

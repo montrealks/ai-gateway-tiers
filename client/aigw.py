@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import warnings
 from typing import Any
 
 import httpx
@@ -44,6 +45,30 @@ PROFILES: dict[str, Any] = {
 # environment rather than the spec — nothing account-shaped lives in git.
 _RESOURCE: str = os.environ.get("AZURE_RESOURCE", "")
 _API_VERSION: str = _SPEC["azure_api_version"]
+
+# DEPRECATED TIER NAMES, accepted for one release so an out-of-tree caller
+# (or a `*_LLM_TIER` env var set in some deployed config) doesn't hard-fail on
+# the rename. `offload` was renamed to `bulk` on 2026-08-08: `/offload` is a
+# workflow verb — an instruction to push mechanical bulk work onto the free
+# Azure lane — and reusing the same word as a tier name was actively confusing.
+# `bulk` names the shape of the work and survives the credit expiry unchanged.
+# Remove this map once nothing warns.
+_DEPRECATED_TIERS: dict[str, str] = {"offload": "bulk"}
+
+
+def _resolve_tier(tier: str) -> str:
+    """Map a deprecated tier name onto its current one, loudly."""
+    if tier in TIERS:
+        return tier
+    current = _DEPRECATED_TIERS.get(tier)
+    if current:
+        warnings.warn(
+            f"tier {tier!r} was renamed to {current!r}; update the call site",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        return current
+    raise KeyError(f"unknown tier {tier!r}; known: {', '.join(TIERS)}")
 
 
 class TierError(RuntimeError):
@@ -205,8 +230,7 @@ def build_chain(
     resource: str | None = None,
     profile: str = "default",
 ) -> list[dict[str, Any]]:
-    if tier not in TIERS:
-        raise KeyError(f"unknown tier {tier!r}; known: {', '.join(TIERS)}")
+    tier = _resolve_tier(tier)
     return [
         _element(s, prompt, images or [], json_mode, temperature, embed_input, resource)
         for s in _ordered(TIERS[tier]["chain"], profile)
