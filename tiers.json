@@ -1,212 +1,295 @@
 {
-  "_what_this_is": "Single source of truth for how every app reaches an LLM. Apps ask for a CAPABILITY TIER, never a model id. All text and embedding traffic goes to the `tiers` gateway on Cloudflare AI Gateway via the UNIVERSAL ENDPOINT, which takes an ordered array of provider attempts and fails over automatically. No provider API key ever appears in app code — every provider key is stored in the gateway, so requests carry only `cf-aig-authorization`.",
-  "_policy": "Azure first, always. Microsoft-for-Startups credits are free until ~2026-09-21 and there is more credit than can be spent before then, so cost is NOT a selection criterion while they last: choose on capability, latency and quota headroom only. Every tier leads with Azure and falls back to a DIFFERENT AZURE MODEL before it will consider anything else — Azure throttling is per-deployment, so a second Azure model rescues the common failure (429/TPM) at zero cost. Only after Azure is exhausted does a tier reach Google's free tier, and only then Cloudflare unified billing (vendor list price +5%).",
-  "gateway": "tiers",
-  "endpoint": "https://gateway.ai.cloudflare.com/v1/{account_id}/tiers",
-  "method": "POST",
-  "auth_header": "cf-aig-authorization: Bearer $CF_AIG_TOKEN",
-  "attribution_header": "cf-aig-metadata: {\"project\":\"<app>\"}",
-  "_request_shape": "POST the endpoint with a JSON ARRAY of attempts. Each element is {provider, endpoint, headers, query}. `query` holds the REQUEST BODY (not URL params); anything that must be a URL parameter goes inside the `endpoint` string. The gateway tries elements in order and returns the first success. The response is the WINNING PROVIDER's native shape — use the client helper to normalise it.",
-  "_no_max_tokens": "Never send `max_tokens`. Every gpt-5.x model rejects it (400 'Unsupported parameter') because they expect `max_completion_tokens`, and the compat layer does not translate. Omitting the parameter entirely works on every provider here and is the only form that survives failover across providers with different wire formats.",
-  "azure_api_version": "2024-10-21",
-  "profiles": {
-    "_what_this_is": "A profile REORDERS a tier's existing chain. It never introduces a model the tier does not already list, so capability stays a property of the TIER and only the order of preference changes. Reordering is a stable sort on provider, so two steps from the same provider keep their measured order.",
-    "_not_the_only_mechanism": "This client is for local and Python work. The WordPress client sites do NOT use it — they call gateway-side DYNAMIC ROUTES, which encode a free-first policy in Cloudflare so a PHP site gets failover with no chain logic in application code. LIVE INVENTORY read off the CF API 2026-08-08, and this is all of it: route1views and profilo each run a route named `low` = gemini-3.1-flash-lite (r2) -> azure gpt-5.4 (r1) -> claude-haiku-4-5 (r0), called as model `dynamic/low`; cnx-cinema runs a ONE-STEP route named `gemini-flash-lite` (NOT `low`); every other gateway — including `tiers` and `helloplaydate` — has NO routes. Those routes are GOOGLE-first while this file's `low` is AZURE-first, and that is deliberate (a client site should lean on the perpetual Google free tier, not the expiring Azure credits — the same thing the `client` profile expresses here). They share the POLICY GOAL, not the chain; do not claim they are in sync. Also verified 2026-08-08: `kboodle` has NO gateway (error 7002), and helloplaydate does NOT use a dynamic route — it resolves its own chain client-side against the universal endpoint on its own gateway so it can attach per-user attribution, and the stray unused `low` route on that gateway has been deleted. See README for the route API's conventions.",
-    "_why_not_a_tier": "`low`/`high`/`code`/`embed` name a CAPABILITY. A client site's tag suggestion needs exactly the same capability as a script's — what differs is which free pool should pay for it. That is a cost axis, not a capability axis, so it belongs in a profile.",
-    "default": {
-      "purpose": "internal, batch and development work",
-      "prefer": [
-        "azure-openai",
-        "google-ai-studio",
-        "anthropic"
-      ],
-      "rationale": "Azure credits are free but FINITE and expire ~2026-09-21. Spend them first — unspent credit is worth nothing after that date."
+ "_what_this_is": "Single source of truth for how every app reaches an LLM. Apps ask for a CAPABILITY TIER, never a model id. All text and embedding traffic goes to the `tiers` gateway on Cloudflare AI Gateway via the UNIVERSAL ENDPOINT, which takes an ordered array of provider attempts and fails over automatically. No provider API key ever appears in app code — every provider key is stored in the gateway, so requests carry only `cf-aig-authorization`.",
+ "_policy": "Azure first, always. Microsoft-for-Startups credits are free until ~2026-09-21 and there is more credit than can be spent before then, so cost is NOT a selection criterion while they last: choose on capability, latency and quota headroom only. Every tier leads with Azure and falls back to a DIFFERENT AZURE MODEL before it will consider anything else — Azure throttling is per-deployment, so a second Azure model rescues the common failure (429/TPM) at zero cost. Only after Azure is exhausted does a tier reach Google's free tier, and only then Cloudflare unified billing (vendor list price +5%).",
+ "gateway": "tiers",
+ "endpoint": "https://gateway.ai.cloudflare.com/v1/{account_id}/tiers",
+ "method": "POST",
+ "auth_header": "cf-aig-authorization: Bearer $CF_AIG_TOKEN",
+ "attribution_header": "cf-aig-metadata: {\"project\":\"<app>\"}",
+ "_request_shape": "POST the endpoint with a JSON ARRAY of attempts. Each element is {provider, endpoint, headers, query}. `query` holds the REQUEST BODY (not URL params); anything that must be a URL parameter goes inside the `endpoint` string. The gateway tries elements in order and returns the first success. The response is the WINNING PROVIDER's native shape — use the client helper to normalise it.",
+ "_no_max_tokens": "Never send `max_tokens`. Every gpt-5.x model rejects it (400 'Unsupported parameter') because they expect `max_completion_tokens`, and the compat layer does not translate. Omitting the parameter entirely works on every provider here and is the only form that survives failover across providers with different wire formats.",
+ "azure_api_version": "2024-10-21",
+ "_profiles_removed": "REMOVED 2026-08-08. `profiles` was a second way to say `policy` — it reordered a chain by PROVIDER while `policy_order` reorders the same chain by MODEL, with two nouns, two implementations and neither client understanding the other's. It had zero callers across the whole fleet (only the selftest and one README line), so it was deleted rather than reconciled: `policies` supersedes it. The one thing it expressed that `policy` does not yet is 'prefer the PERPETUAL free pool (Google) over the EXPIRING one (Azure)' — that intent now lives in the gateway-side dynamic routes the client sites actually call (see _other_mechanisms), and should become a real policy name when the Azure credits lapse, not a resurrected profile.",
+ "_other_mechanisms": {
+  "_what_this_is": "This file's chains are what the Python client and the llm-tiers Worker resolve. They are NOT the only path to a model in the fleet, and the others are not in sync with this file.",
+  "gateway_dynamic_routes": "LIVE INVENTORY read off the CF API 2026-08-08, and this is all of it: route1views and profilo each run a Cloudflare route named `low` = gemini-3.1-flash-lite (r2) -> azure gpt-5.4 (r1) -> claude-haiku-4-5 (r0), called as model `dynamic/low`; cnx-cinema runs a ONE-STEP route named `gemini-flash-lite` (NOT `low`); every other gateway — including `tiers` and `helloplaydate` — has NO routes. Those routes are GOOGLE-first while this file's `low` is AZURE-first, and that is deliberate: a client site should lean on the perpetual Google free tier, not the expiring Azure credits. They share the POLICY GOAL, not the chain; do not claim they are in sync. See tiers.low._divergence.",
+  "app_owned_resolvers": "Verified 2026-08-08: `kboodle` has NO gateway (error 7002) and resolves its own two-step chain from its own config. helloplaydate does NOT use a dynamic route — it resolves its own chain client-side against the universal endpoint on its own gateway so it can attach per-user attribution, and the stray unused `low` route on that gateway has been deleted. cnx-cinema reads a VENDORED COPY of this file that has already drifted.",
+  "privacy": "Free-tier Google inputs MAY BE USED TO TRAIN GOOGLE'S MODELS (see google_free_tier.caveat). Anything Google-first — which is every client-site dynamic route — is therefore acceptable only for low-stakes public-ish text. There is no `private` policy yet; the guard is prose."
+ },
+ "tiers": {
+  "low": {
+   "purpose": "cheap/fast — classify, tag, extract, spam-score, short generation",
+   "_definition": "AUTHORITATIVE DEFINITION of the name `low`, as of 2026-08-08. `low` is a QUALITY LEVEL, not a model and not a chain: 'the cheapest member that can still do a short, well-specified, low-stakes text job'. Its members are interchangeable BY CONTRACT — capability `chat`, failover `free` — so a caller may not depend on which one answered. Concretely that means: no numeric threshold calibrated against one member's score distribution (that is a calibrated-decision route, not `low`), no closed-vocabulary output taken on trust without validating it against the enum, no tool calling, and no reliance on a provider-specific JSON-schema extension. A call site that cannot live with any member answering is NOT a `low` call site, whatever it currently passes.",
+   "_divergence": "THE NAME IS NOT YET A DEFINITION EVERYWHERE. Four different chains ship under `low` in this fleet, so any sentence of the form 'low means X' is false for at least one consumer: (1) THIS FILE, authoritative for the Python client and the llm-tiers Worker — gpt-5.6-luna -> DeepSeek-V4-Flash -> gemini-3.6-flash -> claude-haiku-4-5; (2) helloplaydate app/services/ai_gateway.py — luna -> gpt-5.4 -> gemini -> haiku, owned by that repo, NOT edited from here; (3) the live Cloudflare dynamic route used by route1views and profilo — gemini-3.1-flash-lite -> gpt-5.4 -> haiku, Google-first on purpose (see _other_mechanisms); (4) cnx-cinema, a vendored copy of this file that has drifted. Only the CONTRACT above is common to all four. Two of the four also disagree on which provider leads, so 'low' does not even pin a wallet. Reconciling them is a cross-repo change with three other owners; until then, treat a `low` reference in another repo as a name, and read that repo's table for the chain.",
+   "chain": [
+    {
+     "provider": "azure-openai",
+     "model": "gpt-5.6-luna",
+     "cost": "free (MS credits)"
     },
-    "client": {
-      "purpose": "customer-facing microtasks on production client sites — tag suggestion, short content suggestion (kboodle, route1views)",
-      "prefer": [
-        "google-ai-studio",
-        "azure-openai",
-        "anthropic"
-      ],
-      "rationale": "Inverts the Azure-first policy on purpose. The Google free tier is PERPETUAL and resets daily; Azure credits are finite and expire ~2026-09-21. Client sites must keep working past that date without generating a bill, so they should lean on the renewing pool and leave the expiring one for batch work. Gemini flash is also the lowest-latency option measured here, and this traffic is user-visible.",
-      "requires_free_tier": true,
-      "_precondition": "Only valid while the stored AI Studio key belongs to a project with NO billing account. scripts/verify_free_tier.py asserts this; selftest runs it."
+    {
+     "provider": "azure-openai",
+     "model": "DeepSeek-V4-Flash",
+     "cost": "free (MS credits)"
+    },
+    {
+     "provider": "google-ai-studio",
+     "model": "gemini-3.6-flash",
+     "cost": "free tier"
+    },
+    {
+     "provider": "anthropic",
+     "model": "claude-haiku-4-5-20251001",
+     "cost": "unified (paid)"
     }
+   ]
   },
-  "tiers": {
-    "low": {
-      "purpose": "cheap/fast — classify, tag, extract, spam-score, short generation",
-      "chain": [
-        {
-          "provider": "azure-openai",
-          "model": "gpt-5.6-luna",
-          "cost": "free (MS credits)"
-        },
-        {
-          "provider": "azure-openai",
-          "model": "gpt-5.4",
-          "cost": "free (MS credits)"
-        },
-        {
-          "provider": "google-ai-studio",
-          "model": "gemini-3.6-flash",
-          "cost": "free tier"
-        },
-        {
-          "provider": "anthropic",
-          "model": "claude-haiku-4-5-20251001",
-          "cost": "unified (paid)"
-        }
-      ]
+  "high": {
+   "purpose": "reasoning, structured extraction, quality generation",
+   "chain": [
+    {
+     "provider": "azure-openai",
+     "model": "gpt-5.6-terra",
+     "cost": "free (MS credits)"
     },
-    "high": {
-      "purpose": "reasoning, structured extraction, quality generation",
-      "chain": [
-        {
-          "provider": "azure-openai",
-          "model": "gpt-5.4",
-          "cost": "free (MS credits)"
-        },
-        {
-          "provider": "azure-openai",
-          "model": "gpt-5.6-terra",
-          "cost": "free (MS credits)"
-        },
-        {
-          "provider": "google-ai-studio",
-          "model": "gemini-3.1-pro-preview",
-          "cost": "free tier"
-        },
-        {
-          "provider": "anthropic",
-          "model": "claude-sonnet-5",
-          "cost": "unified (paid)"
-        }
-      ]
+    {
+     "provider": "azure-openai",
+     "model": "gpt-5.6-sol",
+     "cost": "free (MS credits)"
     },
-    "bulk": {
-      "purpose": "bulk / deterministic / dev work — mass codemods, batch analysis, large JSON. AZURE ONLY: this lane must never cost money, so it fails rather than escalating to a paid provider.",
-      "chain": [
-        {
-          "provider": "azure-openai",
-          "model": "DeepSeek-V4-Flash",
-          "cost": "free (MS credits)"
-        },
-        {
-          "provider": "azure-openai",
-          "model": "FW-Kimi-K3",
-          "cost": "free (MS credits)",
-          "note": "500k TPM / 500 RPM of its own — the Fireworks quota bucket, separate from the DeepSeek and gpt-5.x ones, so it adds real headroom when Flash throttles rather than competing for the same tokens"
-        },
-        {
-          "provider": "azure-openai",
-          "model": "DeepSeek-V4-Pro",
-          "cost": "free (MS credits)"
-        },
-        {
-          "provider": "azure-openai",
-          "model": "gpt-5.4",
-          "cost": "free (MS credits)"
-        }
-      ]
+    {
+     "provider": "azure-openai",
+     "model": "gpt-5.4",
+     "cost": "free (MS credits)"
     },
-    "code": {
-      "purpose": "code-heavy / agentic work. AZURE ONLY.",
-      "chain": [
-        {
-          "provider": "azure-openai",
-          "model": "gpt-5.4",
-          "cost": "free (MS credits)"
-        },
-        {
-          "provider": "azure-openai",
-          "model": "DeepSeek-V4-Flash",
-          "cost": "free (MS credits)"
-        }
-      ]
+    {
+     "provider": "google-ai-studio",
+     "model": "gemini-3.1-pro-preview",
+     "cost": "free tier"
     },
-    "embed": {
-      "purpose": "text embeddings — semantic search, similarity, bulk photo/article indexing. 1536 dimensions.",
-      "chain": [
-        {
-          "provider": "azure-openai",
-          "model": "text-embedding-3-small",
-          "path": "embeddings",
-          "cost": "free (MS credits)"
-        }
-      ]
+    {
+     "provider": "anthropic",
+     "model": "claude-sonnet-5",
+     "cost": "unified (paid)"
     }
+   ],
+   "policy_order": {
+    "fast": [
+     "gpt-5.6-terra",
+     "gpt-5.6-sol",
+     "gpt-5.4"
+    ],
+    "cheap": [
+     "gpt-5.6-terra",
+     "gpt-5.4",
+     "gpt-5.6-sol"
+    ],
+    "best": [
+     "gpt-5.6-sol",
+     "gpt-5.6-terra",
+     "gpt-5.4"
+    ]
+   }
   },
-  "specialist": {
-    "_what_this_is": "NOT part of the tier system. Narrow-capability providers on capped free plans, reached directly for the one job each is good at. Do not build general text generation on these — the caps are small and they exist to cover gaps Azure has.",
-    "groq": {
-      "billing": "own free tier (BYOK stored as tiers_groq_default)",
-      "limits": "~1,000 requests/day and only ~8,000 tokens/minute on the large models — far too tight for bulk text",
-      "use_for": {
-        "speech_to_text": [
-          "whisper-large-v3-turbo",
-          "whisper-large-v3"
-        ],
-        "text_to_speech": [
-          "canopylabs/orpheus-v1-english",
-          "canopylabs/orpheus-arabic-saudi"
-        ],
-        "moderation": [
-          "meta-llama/llama-prompt-guard-2-86m",
-          "openai/gpt-oss-safeguard-20b"
-        ]
-      }
+  "offload": {
+   "purpose": "bulk / deterministic / dev work — mass codemods, batch analysis, large JSON. AZURE ONLY: this lane must never cost money, so it fails rather than escalating to a paid provider.",
+   "chain": [
+    {
+     "provider": "azure-openai",
+     "model": "gpt-5.6-luna",
+     "cost": "free (MS credits)"
     },
-    "cerebras": {
-      "billing": "own free tier (BYOK stored as tiers_cerebras_default)",
-      "limits": "very generous — 1,000 requests/min, 1M tokens/min, 2B tokens/day",
-      "models": [
-        "gpt-oss-120b",
-        "zai-glm-4.7",
-        "gemma-4-31b"
-      ],
-      "use_for": "reserve capacity for large text batches when Azure is throttled and the job is not latency-critical. No voice, no unique capability beyond speed and headroom."
+    {
+     "provider": "azure-openai",
+     "model": "DeepSeek-V4-Flash",
+     "cost": "free (MS credits)"
+    },
+    {
+     "provider": "azure-openai",
+     "model": "DeepSeek-V4-Flash-dz",
+     "cost": "free (MS credits)"
+    },
+    {
+     "provider": "azure-openai",
+     "model": "FW-Kimi-K3",
+     "cost": "free (MS credits)"
+    },
+    {
+     "provider": "azure-openai",
+     "model": "gpt-5.6-terra",
+     "cost": "free (MS credits)"
     }
+   ],
+   "policy_order": {
+    "fast": [
+     "gpt-5.6-luna",
+     "gpt-5.6-terra",
+     "DeepSeek-V4-Flash",
+     "DeepSeek-V4-Flash-dz",
+     "FW-Kimi-K3"
+    ],
+    "cheap": [
+     "gpt-5.6-luna",
+     "DeepSeek-V4-Flash",
+     "DeepSeek-V4-Flash-dz",
+     "FW-Kimi-K3",
+     "gpt-5.6-terra"
+    ],
+    "best": [
+     "gpt-5.6-terra",
+     "FW-Kimi-K3",
+     "gpt-5.6-luna",
+     "DeepSeek-V4-Flash",
+     "DeepSeek-V4-Flash-dz"
+    ]
+   }
+  }
+ },
+ "_retired_tiers": {
+  "_what_this_is": "Names that were tiers and are not any more. Kept so a stale caller gets an explanation rather than a bare 'unknown tier', and so the reasoning is not re-litigated.",
+  "code": "RETIRED 2026-08-08, zero callers at the time (no call site in any repo in the fleet ever named it). It was mis-purposed in two independent ways. (1) The chain contradicted the purpose: 'code-heavy / agentic' work means TOOL CALLING, and chain member 3 was DeepSeek-V4-Flash, which has tool calling DISABLED on Azure (see _workers_ai_option, and helloplaydate ai_gateway.py:864-877). An agentic caller failing over to it does not error — it loses its tools and gets prose back with a 200. (2) Deleting that member does not rescue the tier: what remains is gpt-5.6-terra -> gpt-5.6-sol, which is a strict prefix of `high`, so `code` would be a second name for a chain that already exists. The real gap is a CAPABILITY, not a tier: agentic work needs a `tool-loop` contract (same-dialect-only — the chain may only contain members proven to call tools, because a model that cannot call tools answers with prose rather than erroring). That contract is not declared here yet, deliberately: `video` is already an empty capability the system cannot route, and a second one would read as coverage that does not exist. Until a tool-loop capability is implemented and has a caller, agentic work belongs on `high` with the chain narrowed BY THE CALLER, which is exactly what helloplaydate's analytics_digest/agent.py does today."
+ },
+ "specialist": {
+  "_what_this_is": "NOT part of the tier system. Narrow-capability providers on capped free plans, reached directly for the one job each is good at. Do not build general text generation on these — the caps are small and they exist to cover gaps Azure has.",
+  "groq": {
+   "billing": "own free tier (BYOK stored as tiers_groq_default)",
+   "limits": "~1,000 requests/day and only ~8,000 tokens/minute on the large models — far too tight for bulk text",
+   "use_for": {
+    "speech_to_text": [
+     "whisper-large-v3-turbo",
+     "whisper-large-v3"
+    ],
+    "text_to_speech": [
+     "canopylabs/orpheus-v1-english",
+     "canopylabs/orpheus-arabic-saudi"
+    ],
+    "moderation": [
+     "meta-llama/llama-prompt-guard-2-86m",
+     "openai/gpt-oss-safeguard-20b"
+    ]
+   }
   },
-  "deliberate_exceptions": {
-    "_what_this_is": "The only paths allowed to skip Azure. Each is a considered trade, not an oversight.",
-    "gpt-image-1.5_on_cloudflare": "Customer-facing image generation runs on Cloudflare rather than Azure because it returns ~10s faster, and that latency is user-visible. The same model exists on Azure; the speed is the whole reason.",
-    "gpt-5.4-nano_for_coloring_pages": "helloplaydate coloring-page generation runs on Cloudflare gpt-5.4-nano: it is near-free at that size and refuses far less often on character/copyright prompts than the Azure content filter does."
+  "cerebras": {
+   "billing": "own free tier (BYOK stored as tiers_cerebras_default)",
+   "limits": "very generous — 1,000 requests/min, 1M tokens/min, 2B tokens/day",
+   "models": [
+    "gpt-oss-120b",
+    "zai-glm-4.7",
+    "gemma-4-31b"
+   ],
+   "use_for": "reserve capacity for large text batches when Azure is throttled and the job is not latency-critical. No voice, no unique capability beyond speed and headroom."
+  }
+ },
+ "deliberate_exceptions": {
+  "_what_this_is": "The only paths allowed to skip Azure. Each is a considered trade, not an oversight.",
+  "gpt-image-1.5_on_cloudflare": "Customer-facing image generation runs on Cloudflare rather than Azure because it returns ~10s faster, and that latency is user-visible. The same model exists on Azure; the speed is the whole reason.",
+  "gpt-5.4-nano_for_coloring_pages": "helloplaydate coloring-page generation runs on Cloudflare gpt-5.4-nano: it is near-free at that size and refuses far less often on character/copyright prompts than the Azure content filter does."
+ },
+ "google_free_tier": {
+  "how_it_works": "An AI Studio key is on the free tier ONLY while its Google Cloud project has NO billing account attached. Attaching billing to that project — for any reason, including an unrelated API like Maps or Places — silently moves the key to the paid tier, where free quota does not apply and there is no 429 to signal it.",
+  "project_id": "gen-lang-client-0291098513",
+  "verified": "2026-08-04 — gcloud billing projects describe gen-lang-client-0291098513 returns billingEnabled: False. This is the ONLY Google project any stored key may belong to.",
+  "verify": "gcloud billing projects describe <project-id> — billingEnabled must be false. Run scripts/verify_free_tier.py; selftest calls it.",
+  "_naming_trap": "RESOLVED 2026-08-04, recorded because the failure mode is generic. Two projects both DISPLAYED as \"kboodle\" with opposite billing status: `gen-lang-client-0291098513` (unbilled, generativelanguage only) and `kboodle` (billed — Maps, Places, reCAPTCHA, BigQuery for the real app). AI Studio names a new project after whatever you happen to be working on, so this collision is easy to recreate. The unbilled one is now renamed `gemini-free-tier` to make the UI unambiguous. Regardless: identify a Google project by ID, never by display name — display names are not unique.",
+  "_incident_2026_07": "$74.30 was billed on gen-lang-client-0784708444 (\"Gemini Project\", billing enabled) across 2026-06-30..07-30 — 5,702 generativelanguage calls, concentrated on 07-27 (2,678) and 07-30 (1,296) against a ~15/day baseline. Cause: the tier system was still Gemini-primary via `dynamic/*` routes backed by a BYOK key from that billed project. Fixed by the Azure-first rewrite (9fc3001) on 07-30; daily volume collapsed immediately after.",
+  "caveat": "Free-tier inputs MAY BE USED TO TRAIN GOOGLE'S MODELS. This is the live tension in the client-site DYNAMIC ROUTES (see _other_mechanisms), which deliberately make Google primary for customer-facing content. Acceptable only for low-stakes public-ish text (tag suggestion from already-published post content). Do NOT route private, personal or client-confidential data through the `client` profile — use this file's tiers, which lead with Azure.",
+  "rule": "Never store an AI Studio key from a billing-enabled project as gateway BYOK."
+ },
+ "byok_reality": {
+  "what_byok_does": "Storing a provider key in the gateway moves that spend from Cloudflare unified credits onto YOUR account with that provider, and lets apps call keylessly.",
+  "what_byok_does_not_do": "It does not grant you a free tier. A stored key bills whatever that account bills. Confirm an account is genuinely free-tier before treating a BYOK step as free.",
+  "cost_field_warning": "The gateway's `cost` field is a list-price estimate and ignores hidden reasoning tokens — it can understate real spend by ~8x. Do not use it to verify that something is free."
+ },
+ "stored_keys": {
+  "_all_google_keys": "Every google-ai-studio secret below holds the SAME key, from gen-lang-client-0291098513 (billingEnabled: false). Re-verified and re-stored 2026-08-04.",
+  "tiers_azure-openai_default": "Azure AI Foundry",
+  "tiers_google-ai-studio_default": "AI Studio key from the unbilled project",
+  "tiers_groq_default": "Groq free tier",
+  "tiers_cerebras_default": "Cerebras free tier",
+  "kboodle_google-ai-studio_default": "same unbilled AI Studio key — serves kboodle's tag/content suggestion, Google-first (see _other_mechanisms)",
+  "route1views_google-ai-studio_default": "same unbilled AI Studio key — serves route1views' creator helpers, Google-first (see _other_mechanisms)"
+ },
+ "_deployment_capacity": "Azure throttling is per-deployment TPM, set by sku.capacity, and capacity is free — provision to the entitlement ceiling rather than guessing. Current: gpt-5.4, gpt-5-mini, gpt-5.6-luna/terra/sol and text-embedding-3-small at 2000; DeepSeek-V4-Pro 1000; DeepSeek-V4-Flash 250 (its own quota ceiling); Kimi-K2.7-Code 100 and entitled to only 100, which is why it saturates and is in no chain. Check entitlement before deploying: az cognitiveservices usage list -l eastus2. List deployments: az cognitiveservices account deployment list --name <resource> --resource-group <rg> -o table",
+ "_model_churn": "Do NOT chase model releases. A swap is one edit to this file, so there is no advantage in being early and no cost to being late. Re-evaluate at two moments only: (1) when Azure credits expire, which is when price starts to matter at all, and (2) when a candidate shows a MEASURED win on real workloads. Vendor benchmarks are not evidence — run the comparison. Price cuts alone are never a reason to swap while credits last.",
+ "_when_credits_expire": "Around 2026-09-21 the Azure lane stops being free and the chain's economics invert: the paid tail (Google free tier, then Cloudflare unified at Claude/OpenAI list price +5%) becomes the expensive part rather than the safety net. Candidates that make the post-credit chain cheap, both already in the Azure catalog: openai gpt-5.6-luna (~$0.20/$1.20 per 1M) and DeepSeek-V4-Flash (~$0.14/$0.28). Both are close enough to free-tier economics to sit above Cloudflare unified. Revisit the whole chain then, not before.",
+ "_workers_ai_option": "MEASURED 2026-08-05, REVISED after a real-task rerun — see docs/reference/workers-ai-bakeoff.md and rerun scripts/bakeoff_workers_ai.py. Cloudflare Workers AI is a third free-ish lane: neuron-billed, 10k neurons/day, and this account is on the PAID Workers plan so it bills past that rather than failing. WINNER on the real route1views categoriser (65-term closed vocabulary, 1-3 picks, strict JSON): @cf/meta/llama-4-scout-17b-16e-instruct — 3/3 at 1053ms and ~13.4 neurons, MATCHING production gemini-3.1-flash-lite (5/5, 1188ms) on both reliability and speed. IMPORTANT CORRECTION: an earlier pass of this bakeoff used toy prompts and crowned @cf/meta/llama-3.2-3b-instruct; on the real task that model scores 1/3, inventing categories outside the taxonomy and returning up to NINE when asked for 1-3. Never rank a model on a prompt smaller than the real one. AVOID the gpt-oss reasoning models for structured work (gpt-oss-20b 0%, gpt-oss-120b 44% — they return content:null once reasoning eats the completion budget), though gpt-oss-120b DOES support tool calling correctly, which Azure DeepSeek-V4 does not. Post-credit `low` could become google-ai-studio -> workers-ai/llama-4-scout-17b -> anthropic. Caveats: no 1536-dim embedding model (adopting embeddings means re-embedding every stored vector), and only llama-3.2-11b-vision handles images, so vision cannot move wholesale.",
+ "azure_catalog_notes": {
+  "gpt-5.6": "Three variants — sol (flagship), terra (balanced), luna (cost-efficient). These are DURABLE CAPABILITY TIERS, not sizes; they replace the mini/nano suffixes and advance on their own cadence, which maps directly onto this file's low/high. All three deployable, build 2026-07-09. Luna's deprecation runs to 2028-01-11 vs 2027-07-09 for sol and terra, so luna is the one Microsoft is positioning as the durable high-volume workhorse.",
+  "DeepSeek-V4-Flash": "Deployable, and on paper it beats DeepSeek-V4-Pro on agentic and coding work. CAVEAT: those results come from DeepSeek's official 2026-07-31 release, whose gains are post-training only. The Azure build is 2026-04-23 — three months earlier, i.e. preview-era weights. Assume Azure serves the WEAKER model until measured otherwise. V4-Pro on Azure carries the same 2026-04-23 build.",
+  "reasoning_tokens": "DeepSeek V4 models run thinking mode by default and bill it at the output rate while it stays invisible in the response. Any cost estimate that counts only visible output tokens will understate real spend — the same trap that makes the gateway's `cost` field unreliable."
+ },
+ "_measured": "Chain order is set by measurement, not release date. Correctness was identical across every candidate on both a vision/JSON rubric and structured-extraction tasks, so latency and quota headroom decide. Median latency on deterministic text: DeepSeek-V4-Flash 1.2s, gpt-5.4 1.6s, gpt-5.6-terra 1.6s, gpt-5.6-sol 1.7s, gpt-5.6-luna 1.8s, DeepSeek-V4-Pro 1.5s (but 2.3x the total wall time), gpt-5-mini 3.4s. On a vision rubric: gpt-5.4 25s, gpt-5.6-terra 30s, gpt-5.6-sol 43s, gpt-5.6-luna 64s, gpt-5-mini 89s. Newer is NOT automatically faster — gpt-5.4 beat every gpt-5.6 variant on both axes, which is why `high` still leads with it. Reproduce: scripts/selftest.py and scripts/probe_text.py.",
+ "azure_resource_env": "AZURE_RESOURCE — your Azure AI Foundry resource name, read from the environment so this file carries no account-specific values. The client raises a clear error if an Azure step is used without it set.",
+ "_capability_model": "Capabilities are a CLOSED set and own the FAILURE CONTRACT. Routes are an OPEN set layered on top: a route pins model+params for one product job and INHERITS its capability's failover rules. Apps send {capability|route, policy} and NEVER a model id — not in code, not in .env. Policy is the only thing an environment overrides (LLM_POLICY=free locally, fast in prod). STRUCTURE, not convention: a TIER is `{chain: [...]}` — an ordered array of INTERCHANGEABLE members; a ROUTE is `{capability, model, ...}` — one scalar model. If a thing may only ever be served by one model, it goes in `routes`, where there is no array to lengthen. `embed` was moved on those grounds 2026-08-08; routes are therefore NOT image-only.",
+ "policies": {
+  "free": "prefer wallets that cost nothing (Azure MS credits, Google free tier). Default.",
+  "fast": "prefer lowest measured latency, cost is acceptable.",
+  "cheap": "prefer lowest cost PER TASK (not per token — see _measured_images/_measured_text).",
+  "best": "prefer highest measured quality, ignore latency and cost."
+ },
+ "capabilities": {
+  "chat": {
+   "failover": "free",
+   "why": "any model answering is fine; the caller does not care which won."
   },
-  "google_free_tier": {
-    "how_it_works": "An AI Studio key is on the free tier ONLY while its Google Cloud project has NO billing account attached. Attaching billing to that project — for any reason, including an unrelated API like Maps or Places — silently moves the key to the paid tier, where free quota does not apply and there is no 429 to signal it.",
-    "project_id": "gen-lang-client-0291098513",
-    "verified": "2026-08-04 — gcloud billing projects describe gen-lang-client-0291098513 returns billingEnabled: False. This is the ONLY Google project any stored key may belong to.",
-    "verify": "gcloud billing projects describe <project-id> — billingEnabled must be false. Run scripts/verify_free_tier.py; selftest calls it.",
-    "_naming_trap": "RESOLVED 2026-08-04, recorded because the failure mode is generic. Two projects both DISPLAYED as \"kboodle\" with opposite billing status: `gen-lang-client-0291098513` (unbilled, generativelanguage only) and `kboodle` (billed — Maps, Places, reCAPTCHA, BigQuery for the real app). AI Studio names a new project after whatever you happen to be working on, so this collision is easy to recreate. The unbilled one is now renamed `gemini-free-tier` to make the UI unambiguous. Regardless: identify a Google project by ID, never by display name — display names are not unique.",
-    "_incident_2026_07": "$74.30 was billed on gen-lang-client-0784708444 (\"Gemini Project\", billing enabled) across 2026-06-30..07-30 — 5,702 generativelanguage calls, concentrated on 07-27 (2,678) and 07-30 (1,296) against a ~15/day baseline. Cause: the tier system was still Gemini-primary via `dynamic/*` routes backed by a BYOK key from that billed project. Fixed by the Azure-first rewrite (9fc3001) on 07-30; daily volume collapsed immediately after.",
-    "caveat": "Free-tier inputs MAY BE USED TO TRAIN GOOGLE'S MODELS. This is the live tension in the `client` profile, which deliberately makes Google primary for customer-facing content on client sites. Acceptable only for low-stakes public-ish text (tag suggestion from already-published post content). Do NOT route private, personal or client-confidential data through the `client` profile — use the default profile, which leads with Azure.",
-    "rule": "Never store an AI Studio key from a billing-enabled project as gateway BYOK."
+  "embed": {
+   "failover": "same-model-different-provider-only",
+   "why": "a DIFFERENT model means a different vector space, so a silent fallback writes vectors that are geometrically meaningless against everything already indexed. Failing over to the SAME model on another provider is safe and encouraged."
   },
-  "byok_reality": {
-    "what_byok_does": "Storing a provider key in the gateway moves that spend from Cloudflare unified credits onto YOUR account with that provider, and lets apps call keylessly.",
-    "what_byok_does_not_do": "It does not grant you a free tier. A stored key bills whatever that account bills. Confirm an account is genuinely free-tier before treating a BYOK step as free.",
-    "cost_field_warning": "The gateway's `cost` field is a list-price estimate and ignores hidden reasoning tokens — it can understate real spend by ~8x. Do not use it to verify that something is free."
+  "image": {
+   "failover": "within-look-only",
+   "why": "a fallback does not degrade quality, it CHANGES THE LOOK. Mid-batch failover returns a set that is stylistically mixed — worse than an error because it is silent."
   },
-  "stored_keys": {
-    "_all_google_keys": "Every google-ai-studio secret below holds the SAME key, from gen-lang-client-0291098513 (billingEnabled: false). Re-verified and re-stored 2026-08-04.",
-    "tiers_azure-openai_default": "Azure AI Foundry",
-    "tiers_google-ai-studio_default": "AI Studio key from the unbilled project",
-    "tiers_groq_default": "Groq free tier",
-    "tiers_cerebras_default": "Cerebras free tier",
-    "kboodle_google-ai-studio_default": "same unbilled AI Studio key — serves kboodle's tag/content suggestion via the `client` profile",
-    "route1views_google-ai-studio_default": "same unbilled AI Studio key — serves route1views' creator helpers via the `client` profile"
+  "image-edit": {
+   "failover": "within-look-only",
+   "why": "as image."
   },
-  "_deployment_capacity": "Azure throttling is per-deployment TPM, set by sku.capacity, and capacity is free — provision to the entitlement ceiling rather than guessing. Current: gpt-5.4, gpt-5-mini, gpt-5.6-luna/terra/sol and text-embedding-3-small at 2000; DeepSeek-V4-Pro 1000; DeepSeek-V4-Flash 250 (its own quota ceiling); Kimi-K2.7-Code 100 and entitled to only 100, which is why it saturates and is in no chain. Check entitlement before deploying: az cognitiveservices usage list -l eastus2. List deployments: az cognitiveservices account deployment list --name <resource> --resource-group <rg> -o table",
-  "_model_churn": "Do NOT chase model releases. A swap is one edit to this file, so there is no advantage in being early and no cost to being late. Re-evaluate at two moments only: (1) when Azure credits expire, which is when price starts to matter at all, and (2) when a candidate shows a MEASURED win on real workloads. Vendor benchmarks are not evidence — run the comparison. Price cuts alone are never a reason to swap while credits last.",
-  "_when_credits_expire": "Around 2026-09-21 the Azure lane stops being free and the chain's economics invert: the paid tail (Google free tier, then Cloudflare unified at Claude/OpenAI list price +5%) becomes the expensive part rather than the safety net. Candidates that make the post-credit chain cheap, both already in the Azure catalog: openai gpt-5.6-luna (~$0.20/$1.20 per 1M) and DeepSeek-V4-Flash (~$0.14/$0.28). Both are close enough to free-tier economics to sit above Cloudflare unified. Revisit the whole chain then, not before.",
-  "_workers_ai_option": "MEASURED 2026-08-05, REVISED after a real-task rerun — see docs/reference/workers-ai-bakeoff.md and rerun scripts/bakeoff_workers_ai.py. Cloudflare Workers AI is a third free-ish lane: neuron-billed, 10k neurons/day, and this account is on the PAID Workers plan so it bills past that rather than failing. WINNER on the real route1views categoriser (65-term closed vocabulary, 1-3 picks, strict JSON): @cf/meta/llama-4-scout-17b-16e-instruct — 3/3 at 1053ms and ~13.4 neurons, MATCHING production gemini-3.1-flash-lite (5/5, 1188ms) on both reliability and speed. IMPORTANT CORRECTION: an earlier pass of this bakeoff used toy prompts and crowned @cf/meta/llama-3.2-3b-instruct; on the real task that model scores 1/3, inventing categories outside the taxonomy and returning up to NINE when asked for 1-3. Never rank a model on a prompt smaller than the real one. AVOID the gpt-oss reasoning models for structured work (gpt-oss-20b 0%, gpt-oss-120b 44% — they return content:null once reasoning eats the completion budget), though gpt-oss-120b DOES support tool calling correctly, which Azure DeepSeek-V4 does not. Post-credit `low` could become google-ai-studio -> workers-ai/llama-4-scout-17b -> anthropic. Caveats: no 1536-dim embedding model (adopting embeddings means re-embedding every stored vector), and only llama-3.2-11b-vision handles images, so vision cannot move wholesale.",
-  "azure_catalog_notes": {
-    "gpt-5.6": "Three variants — sol (flagship), terra (balanced), luna (cost-efficient). These are DURABLE CAPABILITY TIERS, not sizes; they replace the mini/nano suffixes and advance on their own cadence, which maps directly onto this file's low/high. All three deployable, build 2026-07-09. Luna's deprecation runs to 2028-01-11 vs 2027-07-09 for sol and terra, so luna is the one Microsoft is positioning as the durable high-volume workhorse.",
-    "DeepSeek-V4-Flash": "Deployable, and on paper it beats DeepSeek-V4-Pro on agentic and coding work. CAVEAT: those results come from DeepSeek's official 2026-07-31 release, whose gains are post-training only. The Azure build is 2026-04-23 — three months earlier, i.e. preview-era weights. Assume Azure serves the WEAKER model until measured otherwise. V4-Pro on Azure carries the same 2026-04-23 build.",
-    "reasoning_tokens": "DeepSeek V4 models run thinking mode by default and bill it at the output rate while it stays invisible in the response. Any cost estimate that counts only visible output tokens will understate real spend — the same trap that makes the gateway's `cost` field unreliable."
+  "video": {
+   "failover": "opt-in-only",
+   "why": "sora-2 -> MiniMax H3 is a PERMISSION escalation (content filter refused), not a quality ladder. Must never happen automatically."
+  }
+ },
+ "routes": {
+  "_what_this_is": "A route pins ONE model (+ params) for one product job and inherits its capability's failover contract. The structural difference from a tier is the shape, not a convention: a tier has `chain` (an array of interchangeable members), a route has `model` (a scalar). There is nowhere to add a second model to a route without changing its shape, which is the point.",
+  "embed": {
+   "capability": "embed",
+   "purpose": "text embeddings — semantic search, similarity, bulk photo/article indexing.",
+   "provider": "azure-openai",
+   "model": "text-embedding-3-small",
+   "path": "embeddings",
+   "dims": 1536,
+   "wallet": "azure-byok",
+   "cost": "free (MS credits)",
+   "_why_a_route_not_a_tier": "MOVED OUT OF `tiers` 2026-08-08. It was never a tier: its capability contract is same-model-different-provider-only, i.e. its members are DEFINED as not interchangeable, and every implementation already treated it as a pin (the Worker's embedAttempt returns null for any non-Azure step; the chain has had exactly one element everywhere it appears). Filing a pin in the tiers table is an invitation — the obvious maintenance edit on a one-link chain is 'add depth', and the moment a second model answers, vectors from a different geometry land in the same index. Nothing errors; cosine similarity just stops meaning anything, and the only recovery is re-embedding everything. As a route the one-model-ness is structural.",
+   "_second_provider_rule": "The contract permits the SAME model on a DIFFERENT provider (that is genuinely the same vector space) and nothing else. Express that by adding a `providers` list here, never by adding a model.",
+   "_no_policy_model": "Deliberately absent. A one-model capability has no cost, latency or quality axis to select on, so every policy resolves to the same pin — and `cheap` for embeddings is meaningless in principle, not just unimplemented."
   },
-  "_measured": "Chain order is set by measurement, not release date. Correctness was identical across every candidate on both a vision/JSON rubric and structured-extraction tasks, so latency and quota headroom decide. Median latency on deterministic text: DeepSeek-V4-Flash 1.2s, gpt-5.4 1.6s, gpt-5.6-terra 1.6s, gpt-5.6-sol 1.7s, gpt-5.6-luna 1.8s, DeepSeek-V4-Pro 1.5s (but 2.3x the total wall time), gpt-5-mini 3.4s. On a vision rubric: gpt-5.4 25s, gpt-5.6-terra 30s, gpt-5.6-sol 43s, gpt-5.6-luna 64s, gpt-5-mini 89s. Newer is NOT automatically faster — gpt-5.4 beat every gpt-5.6 variant on both axes, which is why `high` still leads with it. Reproduce: scripts/selftest.py and scripts/probe_text.py.",
-  "azure_resource_env": "AZURE_RESOURCE — your Azure AI Foundry resource name, read from the environment so this file carries no account-specific values. The client raises a clear error if an Azure step is used without it set."
+  "coloring-sheet": {
+   "capability": "image-edit",
+   "model": "FLUX.1-Kontext-pro",
+   "wallet": "azure-byok",
+   "_why": "line art has a low quality ceiling, so the cheaper/faster model is genuinely sufficient — and its tendency to SIMPLIFY detail is an advantage here (fewer, bolder lines to colour). 14.5s vs 38s.",
+   "policy_model": {
+    "fast": "FLUX.1-Kontext-pro",
+    "cheap": "FLUX.1-Kontext-pro",
+    "best": "gpt-image-1.5"
+   }
+  },
+  "likeness-edit": {
+   "capability": "image-edit",
+   "model": "gpt-image-1.5",
+   "wallet": "azure-byok",
+   "params": {
+    "input_fidelity": "high"
+   },
+   "_why": "measured 2026-08-08: preserved paisley scarf detail, face structure and curl detail that FLUX.1-Kontext flattened. Use whenever the subject must still look like themselves.",
+   "policy_model": {
+    "fast": "gpt-image-1.5",
+    "cheap": "gpt-image-1.5",
+    "best": "gpt-image-1.5"
+   }
+  }
+ },
+ "_measured_images": "2026-08-08, same source photo -> coloring page, images/edits. gpt-image-1.5 38.0s Azure / 40.8s CF. FLUX.1-Kontext-pro 14.5s Azure / 14.5s CF. TWO FINDINGS: (1) FLUX.1-Kontext is 2.6x FASTER but flattens detail — right for line art, wrong for likeness. (2) THE CF RAIL IS NOT FASTER THAN AZURE for images — identical within noise. So paying CF unified billing for 'speed' on image work buys nothing; the only real difference is which wallet. For images `policy:fast` therefore means CHOOSE FLUX, not change rail. FLUX.2-pro is deployed (GlobalStandard 4 + DataZoneStandard 4 as FLUX.2-pro-dz) but UNREACHABLE — 404 on every endpoint/api-version combination tried; it wants api-version=2024-10-21 where FLUX.1 wants 2025-04-01-preview, and still will not serve. Do not plan around it until that is solved. AA ranks it far above FLUX.1 for editing (#15 vs #56 of 66), so it is worth revisiting.",
+ "_policy_implementation": "`policy` reorders a chat tier's chain via `policy_order`, and swaps a route's model via `policy_model`. Omitting policy uses the declared chain / route model, which IS the `free` default. Unknown policy names are REJECTED rather than silently ignored — a policy that quietly does nothing is worse than an error. KNOWN GAP, same principle, not yet closed: a policy that is VALID but INAPPLICABLE (`low` and the `embed` route declare no policy_order/policy_model) currently succeeds having done nothing. The Worker still 200s; the Python client warns. Closing it properly means either giving every tier a measured policy_order or rejecting the combination, and the measurements to order `low` by do not exist yet. NOTE for image routes: measurement 2026-08-08 showed the CF rail is NOT faster than Azure (38.0 v 40.8s, 14.5 v 14.5s), so `fast` selects a faster MODEL, never a different wallet."
 }
