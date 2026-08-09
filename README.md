@@ -1,6 +1,6 @@
 # ai-gateway-tiers
 
-**Ask for a capability tier, never a model.** Every app names `low`, `high`, `bulk`, `code` or `embed`; this repo owns what those resolve to.
+**Ask for a capability, never a model.** Every app names a TIER (`low`, `high`, `offload`) or a ROUTE (`embed`, and the image routes); this repo owns what those resolve to.
 
 Azure leads every tier — Microsoft-for-Startups credits are free until ~2026-09-21, and there is more credit than can be spent before then. Each tier falls back to a *second Azure model* before it will consider anything that costs money.
 
@@ -21,7 +21,8 @@ from aigw import chat, embed          # async: achat, aembed
 text = chat("low", "Classify this as spam or not: ...")
 cfg  = chat("low", prompt, json_mode=True)          # -> parsed dict
 out  = chat("high", prompt, images=[jpeg_b64])      # vision
-vec  = embed("a sentence")                          # 1536 dims
+vec  = embed("a sentence")                          # 1536 dims — a route, one model
+fast = chat("high", prompt, policy="fast")          # reorder the chain
 ```
 
 Needs `CF_ACCOUNT_ID`, `CF_AIG_TOKEN` and `AZURE_RESOURCE` — see `.env.example`. No provider key: they're stored in the gateway, so calls go keyless.
@@ -31,7 +32,7 @@ Pass `project="<app>"` on every call. It becomes `cf-aig-metadata` and is what m
 Verify a working setup, and see which provider actually answered:
 
 ```bash
-python3 scripts/selftest.py            # every tier, plus json_mode, vision, embeddings
+python3 scripts/selftest.py            # every tier + the embed route, json_mode, vision, policy
 python3 scripts/probe_text.py          # latency + correctness across deployments
 python3 scripts/stress.py 120 30       # concurrency, attribution, and failover
 ```
@@ -43,37 +44,89 @@ failover is the property the whole design rests on, and it's invisible in normal
 
 | Tier | Purpose | Chain |
 |---|---|---|
-| `low` | classify, tag, extract, short generation | Azure gpt-5.6-luna → Azure gpt-5.4 → Gemini free → Claude Haiku |
-| `high` | reasoning, structured extraction | Azure gpt-5.4 → Azure gpt-5.6-terra → Gemini free → Claude Sonnet |
-| `bulk` | bulk / deterministic / dev work | Azure DeepSeek-V4-Flash → Azure FW-Kimi-K3 → Azure DeepSeek-V4-Pro → Azure gpt-5.4 |
-| `code` | code-heavy / agentic | Azure gpt-5.4 → Azure DeepSeek-V4-Flash |
-| `embed` | embeddings, 1536-dim | Azure text-embedding-3-small |
+| `low` | classify, tag, extract, short generation | Azure gpt-5.6-luna → Azure DeepSeek-V4-Flash → Gemini free → Claude Haiku |
+| `high` | reasoning, structured extraction | Azure gpt-5.6-terra → Azure gpt-5.6-sol → Azure gpt-5.4 → Gemini free → Claude Sonnet |
+| `offload` | bulk / deterministic / dev work | Azure gpt-5.6-luna → Azure DeepSeek-V4-Flash → Azure DeepSeek-V4-Flash-dz → Azure FW-Kimi-K3 → Azure gpt-5.6-terra |
 
-`bulk` and `code` are **Azure-only by design** — they fail rather than escalate to a paid provider.
+`offload` is **Azure-only by design** — it fails rather than escalate to a paid provider.
+
+The table above is the **authoritative** definition of each name for the Python client and the
+llm-tiers Worker. It is *not* the only definition in the fleet: four different chains ship under
+the name `low` (this file, helloplaydate's own resolver, the live Cloudflare route used by
+route1views and profilo, and cnx-cinema's drifted vendored copy), so **"low means X" is false for
+at least one consumer**. Only the *contract* is common — see `tiers.low._definition` and
+`tiers.low._divergence` in `tiers.json`, which spell out what a `low` call site may and may not
+assume. When you read `low` in another repo, read that repo's table for the chain.
+
+`code` was **retired 2026-08-08** with zero callers. Its purpose said "agentic", which means tool
+calling, but chain member 3 was `DeepSeek-V4-Flash`, which has tool calling *disabled* on Azure — a
+failover there doesn't error, it drops the caller's tools and returns prose with a 200. Removing
+that member doesn't rescue it either: what's left is a strict prefix of `high`. The real gap is a
+missing **capability** (`tool-loop`, same-dialect-only), not a tier. Until that exists, agentic work
+goes on `high` with the chain narrowed by the caller. `chat("code", …)` raises and says so.
+
+## Tiers vs routes
+
+A **tier** is a chain of *interchangeable* models — any of them answering is acceptable and the
+caller may not depend on which won. A **route** pins ONE model for one job and inherits its
+capability's failure contract. The difference is **structural, not a convention**: a tier has
+`chain` (an array), a route has `model` (a scalar). There is nowhere on a route to add a second
+model.
+
+| Route | Capability | Model |
+|---|---|---|
+| `embed` | `embed` (same-model-different-provider-only) | Azure `text-embedding-3-small`, 1536-dim |
+| `coloring-sheet` | `image-edit` (within-look-only) | `FLUX.1-Kontext-pro`, `best` → `gpt-image-1.5` |
+| `likeness-edit` | `image-edit` (within-look-only) | `gpt-image-1.5` |
+
+`embed` was filed as a *tier* until 2026-08-08, which was wrong and mildly dangerous: its own
+capability contract defines its members as **not** interchangeable, every implementation already
+treated it as a pin, and the obvious maintenance edit on a one-link chain is "add depth". A second
+embedding model is a second vector space — nothing errors, cosine similarity just stops meaning
+anything against everything already indexed, and the only fix is re-embedding the lot.
+
+**Image routes are Worker-only, deliberately.** They're `multipart/form-data` with a binary source
+and a base64 image response, not the JSON chain the Python client posts. `llm-tiers-worker` owns
+them (`POST /v1/image {route, prompt, image_b64?}`) and every language in the fleet reaches it over
+plain HTTP; a second implementation in Python would defeat the point of having one contract.
+
+## Policies
+
+`free` (default) · `fast` · `cheap` · `best`. A policy **reorders** a tier's chain via its declared
+`policy_order`, and swaps a route's model via `policy_model`. It can never introduce a model the
+tier doesn't already list, so capability stays a property of the tier.
+
+```python
+chat("high", prompt)                    # declared order — this IS `free`
+chat("high", prompt, policy="best")     # gpt-5.6-sol first, same five models
+chat("high", prompt, policy="nope")     # KeyError — never silently ignored
+```
+
+Policy is the one knob an environment should override (`LLM_POLICY=free` locally, `fast` in prod).
+**Known gap:** a policy that is valid but *inapplicable* — `low` declares no `policy_order` — is a
+warning in the Python client and a silent no-op on the Worker. Closing it needs measurements to
+order `low` by, which don't exist yet.
 
 `Kimi-K2.7-Code` is deliberately absent: its deployment capacity is 100 against 500 for `gpt-5.4` and `DeepSeek-V4-Pro`, so it saturates on real workloads and returns `finish_reason: length` with empty content.
 
-## Profiles
+## Where the Google free tier is checked
 
-A tier says *what capability you need*. A profile says *which free pool should pay for it*. A profile only **reorders** a tier's existing chain — it can never introduce a model the tier doesn't already list, so capability stays a property of the tier alone.
-
-```python
-chat("low", prompt)                      # default — Azure first
-chat("low", prompt, profile="client")    # Gemini free first, Azure second
-```
-
-| Profile | Order | Why |
-|---|---|---|
-| `default` | Azure → Google → Anthropic | Azure credits are free but **finite and expire ~2026-09-21**. Spend them first; unspent credit is worth nothing after that date. |
-| `client` | Google → Azure → Anthropic | The Google free tier is **perpetual and resets daily**. Production client sites must keep working past September without generating a bill, so they lean on the renewing pool. Gemini flash is also the lowest-latency option measured here, and this traffic is user-visible. |
-
-Use `client` for customer-facing microtasks on client sites — tag suggestion, short content suggestion. **Do not use it for private or client-confidential data:** free-tier inputs may be used to train Google's models. Anything sensitive belongs on the default profile, which leads with Azure.
-
-The `client` profile's premise is that Google *cannot* bill you. That is not a property of the key — it's a property of the key's Google Cloud project, and it flips silently the moment a billing account is attached for any reason, including an unrelated API like Maps. So it's checked, not documented:
+Several chains end on Google, and the client sites' dynamic routes *lead* with it. That premise —
+Google cannot bill us — is not a property of the key; it's a property of the key's Google Cloud
+project, and it flips silently the moment a billing account is attached for any reason, including
+an unrelated API like Maps. So it's checked, not documented:
 
 ```bash
 python3 scripts/verify_free_tier.py    # selftest runs this too
 ```
+
+Free-tier inputs **may be used to train Google's models**, so nothing private, personal or
+client-confidential belongs on a Google-first path. There is no `private` policy yet; the guard is
+prose.
+
+**`profiles` was removed 2026-08-08.** It reordered a chain by *provider* while `policy_order`
+reorders the same chain by *model* — the same axis under two nouns, with two implementations and
+neither client understanding the other's. Zero callers fleet-wide. `policies` supersedes it.
 
 ## Two mechanisms, one policy
 
@@ -106,7 +159,7 @@ buy tokens from the paid tail.
 deployed route is **Google-first** (`gemini-3.1-flash-lite → gpt-5.4 → haiku`) while this repo's
 `low` is **Azure-first** (`gpt-5.6-luna → gpt-5.4 → gemini → haiku`). That divergence is
 deliberate — a PHP site should lean on the *perpetual* Google free tier rather than the expiring
-Azure credits, which is exactly what the `client` **profile** expresses for Python callers — but
+Azure credits, a deliberate divergence recorded in `tiers.low._divergence` — but
 it means the two mechanisms share a POLICY GOAL (free first), not a chain. Only the goal is
 common; check both when you change either.
 
@@ -308,7 +361,7 @@ Cloudflare's, even for a unified-eligible provider.
 
 Reached directly for the one job each is good at; don't build general text generation on them.
 
-- **Groq** — free, but only ~8,000 tokens/minute, far too tight for bulk. Speech-to-text `whisper-large-v3-turbo`, TTS `canopylabs/orpheus-v1-english`, moderation `meta-llama/llama-prompt-guard-2-86m`.
+- **Groq** — free, but only ~8,000 tokens/minute, far too tight for offload. Speech-to-text `whisper-large-v3-turbo`, TTS `canopylabs/orpheus-v1-english`, moderation `meta-llama/llama-prompt-guard-2-86m`.
 - **Cerebras** — free and very generous (1M tokens/min, 2B/day). `gpt-oss-120b`, `zai-glm-4.7`. Reserve capacity for large, non-latency-critical text batches when Azure is throttled.
 
 ## Deliberate exceptions
