@@ -1,5 +1,24 @@
 # ai-gateway-tiers
 
+> **Status as of 2026-08-09 — reference data, not a runtime dependency.**
+>
+> The fleet no longer shares a tier table. Each app now owns its model choice
+> outright: its own Cloudflare AI Gateway, its own keys, and either a dynamic
+> route (for interchangeable text) or a pinned model (for anything calibrated).
+> helloplaydate's in-app failover machinery was deleted the same day, and the
+> `llm-tiers` Worker that fronted this table is gone. A shared table across many
+> apps produced drift rather than consistency.
+>
+> What survives here is worth keeping and is **the reason this repo is not
+> archived**: the measured bakeoffs, the cost and capability audits, the
+> taxonomy work in `docs/`, and `tiers.json` as a record of what the chains
+> actually resolved to. Read it as evidence, not as configuration.
+>
+> The Python client (`client/aigw.py`) is still live, but for exactly one
+> consumer: an offline bulk-generation script in helloplaydate. Do not wire a
+> new app to it — see the `/llm-audit` Claude Code skill for the current
+> per-app conventions.
+
 **Ask for a capability, never a model.** Every app names a TIER (`low`, `high`, `offload`) or a ROUTE (`embed`, and the image routes); this repo owns what those resolve to.
 
 Azure leads every tier — Microsoft-for-Startups credits are free until ~2026-09-21, and there is more credit than can be spent before then. Each tier falls back to a *second Azure model* before it will consider anything that costs money.
