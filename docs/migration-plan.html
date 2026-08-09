@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Migrating the apps onto the llm-tiers router — plan, 8 Aug 2026</title>
+<style>
+  :root { --ink:#16181d; --mid:#5a6272; --line:#dfe3ea; --bg:#fbfbfc;
+          --good:#1f7a4d; --warn:#a86400; --bad:#a8322a; --accent:#1f2be0; }
+  * { box-sizing:border-box }
+  body { margin:0; padding:48px 24px 96px; background:var(--bg); color:var(--ink);
+         font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  main { max-width:920px; margin:0 auto }
+  h1 { font-size:34px; line-height:1.15; letter-spacing:-.02em; margin:0 0 6px }
+  .sub { color:var(--mid); font-size:15px; margin:0 0 40px }
+  h2 { font-size:24px; letter-spacing:-.01em; margin:52px 0 14px; padding-top:22px; border-top:1px solid var(--line) }
+  h3 { font-size:17px; margin:28px 0 8px }
+  h4 { font-size:14px; text-transform:uppercase; letter-spacing:.07em; color:var(--mid); margin:20px 0 6px }
+  p, li { color:#23262d }
+  code { font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; background:#eef0f4;
+         padding:1px 5px; border-radius:4px; }
+  pre { background:#16181d; color:#e8eaf0; padding:16px 18px; border-radius:8px; overflow-x:auto;
+        font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  pre code { background:none; padding:0; color:inherit }
+  table { border-collapse:collapse; width:100%; margin:18px 0; font-size:14.5px }
+  th,td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top }
+  th { font-size:12px; text-transform:uppercase; letter-spacing:.07em; color:var(--mid); font-weight:600 }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:20px 24px; margin:22px 0 }
+  .tag { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+         padding:2px 8px; border-radius:99px; vertical-align:2px }
+  .t-good { background:#e4f3ea; color:var(--good) } .t-warn { background:#fbf0dd; color:var(--warn) }
+  .t-bad  { background:#fbe6e4; color:var(--bad) }
+  .lede { font-size:18px; line-height:1.6; color:#2c3038 }
+  .verdict { border-left:3px solid var(--accent); padding-left:18px; margin:26px 0 }
+  .stop { border-left:3px solid var(--bad); padding-left:18px; margin:26px 0 }
+  ul { padding-left:22px } li { margin:5px 0 }
+  .foot { margin-top:64px; padding-top:20px; border-top:1px solid var(--line); color:var(--mid); font-size:13px }
+  .app { background:#fff; border:1px solid var(--line); border-left:4px solid var(--accent);
+         border-radius:10px; padding:4px 24px 20px; margin:26px 0 }
+  .app.stopped { border-left-color:var(--bad) }
+  .app h3 { margin-top:22px }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Getting the apps onto the router</h1>
+<p class="sub">Migration plan — 8 August 2026 · four consumers, one dispatcher · kboodle deliberately excluded</p>
+
+<p class="lede">The router works. Nothing uses it. This is the plan for moving each consumer across —
+written after reading every call site, which changed the answer in three places: one app should
+<em>not</em> migrate, one can only migrate halfway, and the "shared Python client" turns out to have
+eight downstream repos rather than one.</p>
+
+<div class="card">
+<p><strong>Verified live while writing this, 8 Aug 2026:</strong> <code>/health</code> returns
+<code>{"ok":true}</code>; <code>/v1/tiers</code> returns five tiers whose chains are byte-identical to
+<code>tiers.json</code> in git, so KV is currently in sync; five per-app tokens exist in
+<code>app-tokens.txt</code>.</p>
+<p>Also worth noting: three defects from the architecture review are already closed — per-app tokens
+(#4), <code>/v1/embed</code> (#5) and streaming (#6) all shipped. Defect #1 (no client fallback) has
+not, and it shapes the sequencing below.</p>
+</div>
+
+<h2>What the reading changed</h2>
+
+<p>Five findings that the plan has to be built around, none of which were visible from the outside:</p>
+
+<table>
+  <tr><th>Finding</th><th>Consequence</th></tr>
+  <tr>
+    <td><strong>helloplaydate attributes spend <em>per user</em>, not per project.</strong> Its
+        <code>cf-aig-metadata</code> carries <code>request_id</code>, <code>user_id</code> (or a
+        salted <code>ip_hash</code>) and <code>booklet_id</code>, bound per request from an ambient
+        contextvar in <code>app/main.py</code>.</td>
+    <td><span class="tag t-bad">blocks</span> The Worker forwards only <code>{project}</code>, and a
+        per-app token <em>forces</em> that value to the app name. The justification has <strong>not</strong>
+        expired. See its section.</td>
+  </tr>
+  <tr>
+    <td><strong>cnx-cinema's reviewer is a 16-round tool-calling loop</strong>
+        (<code>MAX_TOOL_ROUNDS=16</code>, TMDB function tools, chain narrowed to OpenAI-shaped
+        providers when tools are present).</td>
+    <td><span class="tag t-bad">blocks</span> <code>/v1/chat</code> has no <code>tools</code>
+        parameter. Its <code>tiers.json</code> cannot be "deleted outright" — only half of it goes.</td>
+  </tr>
+  <tr>
+    <td><strong><code>aigw.py</code> has eight consumer repos</strong> — og-studio, familybook,
+        living-chart (3 scripts), front-door, a helloplaydate script, plus selftest and stress.</td>
+    <td><span class="tag t-warn">widens</span> "Make the client thin" is an eight-repo blast radius,
+        and familybook uses <code>images=</code> and <code>temperature=</code>, neither of which the
+        Worker accepts.</td>
+  </tr>
+  <tr>
+    <td><strong>route1views does not actually hardcode a model.</strong> It calls
+        <code>dynamic/low</code> — a gateway-side Dynamic Route — via the
+        <code>R1V_LLM_MODEL</code> constant in <code>wp-config.php</code>. The
+        <code>gpt-4o-mini</code> the architecture review flagged is a legacy row in a cost table,
+        not a call.</td>
+    <td><span class="tag t-good">helps</span> It is already model-blind. The migration is swapping
+        one indirection for a better one, not rescuing a rotten pin. That makes it the canary.</td>
+  </tr>
+  <tr>
+    <td><strong><code>gate</code> and <code>transcribe</code> do not exist in the KV table.</strong>
+        They exist only in helloplaydate's own <code>TIERS</code>.</td>
+    <td><span class="tag t-warn">gap</span> Any helloplaydate migration needs the table to grow two
+        tiers first — including the deliberately Anthropic-first <code>gate</code>.</td>
+  </tr>
+</table>
+
+<h2>Router gaps that gate the work</h2>
+
+<p>These are not opinions about the Worker; they are things a call site needs and
+<code>/v1/chat</code> currently has no field for. The migration order is largely determined by which
+app trips which gap.</p>
+
+<table>
+  <tr><th>Gap</th><th>Who needs it</th><th>Size</th></tr>
+  <tr><td><code>temperature</code> passthrough</td><td>familybook (4 sites), helloplaydate's calibrated gates, cnx-cinema is fine without</td><td>one line in <code>body</code></td></tr>
+  <tr><td><code>images</code> / real multimodal mapping. Today <code>chatAttempt</code> stringifies non-string <code>content</code> for the Google step and passes it raw to Anthropic, so a vision call only works if Azure answers.</td><td>familybook, any vision work</td><td>~30 lines, per-provider</td></tr>
+  <tr><td><code>system</code> prompt. A <code>{role:"system"}</code> message survives the Azure step but is remapped to <code>user</code> for Google and passed through as an invalid role to Anthropic.</td><td>route1views (<code>SpamScoreService</code>), cnx-cinema reviewer</td><td>~10 lines</td></tr>
+  <tr><td><code>tools</code> + tool-result rounds</td><td>cnx-cinema reviewer only</td><td>substantial — a loop, not a field</td></tr>
+  <tr><td>Per-call <code>metadata</code> (arbitrary keys, not just <code>project</code>)</td><td>helloplaydate, and it is the whole ballgame there</td><td>small in the Worker, plus a privacy contract</td></tr>
+  <tr><td><code>max_completion_tokens</code> exposed in the PHP client</td><td>route1views (<code>setMaxTokens(8000)</code> on the content path)</td><td>trivial</td></tr>
+  <tr><td><code>gate</code> + <code>transcribe</code> tiers in KV</td><td>helloplaydate</td><td>a <code>tiers.json</code> edit + <code>sync.sh</code></td></tr>
+</table>
+
+<h2>Sequencing</h2>
+
+<table>
+  <tr><th>#</th><th>Consumer</th><th>Scope</th><th>Blocked on</th><th>Risk</th></tr>
+  <tr>
+    <td>1</td>
+    <td><strong>route1views</strong> <span class="tag t-good">canary</span></td>
+    <td>3 call sites behind one class</td>
+    <td>PHP client gains <code>json_mode</code> + <code>max_completion_tokens</code></td>
+    <td><span class="tag t-good">low</span></td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td><strong>aigw.py</strong> — text-only tiers</td>
+    <td>8 repos, but only the plain-text callers move</td>
+    <td>#1 proving the Worker under real traffic; client fallback</td>
+    <td><span class="tag t-warn">medium</span></td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td><strong>aigw.py</strong> — vision + temperature callers</td>
+    <td>familybook's 4 sites, living-chart</td>
+    <td>Worker gains <code>temperature</code> and per-provider image mapping</td>
+    <td><span class="tag t-warn">medium</span></td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td><strong>cnx-cinema</strong> — <code>tmdb.js</code> only</td>
+    <td>1 of 2 LLM callers</td>
+    <td>nothing; it is a plain-text <code>low</code> call</td>
+    <td><span class="tag t-warn">medium</span> — deploy is a Docker rebuild on the VPS</td>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td><strong>cnx-cinema</strong> — reviewer, and only then delete its <code>tiers.json</code></td>
+    <td>the tool-calling half</td>
+    <td>Worker learns <code>tools</code></td>
+    <td><span class="tag t-bad">high</span></td>
+  </tr>
+  <tr>
+    <td>—</td>
+    <td><strong>helloplaydate</strong></td>
+    <td colspan="2"><strong>Do not migrate.</strong> Re-open at the Azure credit cliff (~21 Sep 2026), and only if per-call metadata passthrough ships first.</td>
+    <td><span class="tag t-bad">highest</span></td>
+  </tr>
+</table>
+
+<h3>Should this wait on the client fallback?</h3>
+
+<div class="verdict">
+<p><strong>Step 1 may go first without it. Everything after step 1 should wait.</strong></p>
+<p>route1views is the one consumer where a router outage is already a modelled, tested state: every
+one of its three call sites treats a <code>null</code> from <code>LlmService::complete()</code> as
+normal. Title/content/category suggestions are optional UX that silently disappears, and the spam
+classifier on the publish path <em>fails open</em> by design. Adding a hop in front of that changes
+the failure rate, not the failure behaviour — so the canary can prove the router under real traffic
+while the fallback is being written.</p>
+<p>That stops being true immediately afterwards. cnx-cinema's reviewer emails a skip digest and
+loses a night's QA; familybook and living-chart are batch jobs where a mid-run outage wastes the
+run. Those want a fallback chain in the client before they depend on a single Worker.</p>
+</div>
+
+<h3>What must be true before starting</h3>
+<ul>
+  <li><strong>KV matches git.</strong> <code>curl /v1/tiers</code> against <code>tiers.json</code>. True today; it is a manual step, so re-check each time.</li>
+  <li><strong>The app's token is stored where that app keeps secrets</strong> — a <code>wp-config.php</code> constant for route1views, <code>/root/.secrets.env</code> on the VPS for cnx-cinema, <code>.env</code> for Python. Never in the repo, never in a docroot.</li>
+  <li><strong>The old path stays intact and reachable behind a flag</strong> for every migration. Every rollback below is "flip the constant back", which only works if nothing was deleted in the same change.</li>
+  <li><strong>Deletion is a separate, later commit</strong> than the cutover. Migrate, run for a week, then delete.</li>
+</ul>
+
+<h2>Per-app plans</h2>
+
+<div class="app">
+<h3>1 · route1views <span class="tag t-good">canary</span></h3>
+
+<h4>What it does today</h4>
+<p>Three call sites, all through one class, all JSON mode, none streaming, none vision:
+<code>CreatorHelpersController</code> (title + content suggestions, AJAX, includes
+<code>nopriv</code> guests), <code>CreatorController::getAiCategorySuggestions</code> (AJAX,
+<code>nopriv</code>, no rate limit), and <code>SpamScoreService::classify()</code> (synchronous on
+the publish path, fails open). All resolve to provider <code>compat</code> + model
+<code>dynamic/low</code> — a Cloudflare Dynamic Route that already does Google→Azure→Anthropic
+failover server-side.</p>
+
+<h4>What changes</h4>
+<ul>
+  <li><code>LlmService</code> keeps its public API exactly — <code>complete()</code> still returns
+      the OpenAI-shaped envelope and still returns <code>null</code> on failure. Only its private
+      <code>buildUrl</code>/<code>buildHeaders</code>/<code>buildRequestBody</code>/<code>parseResponse</code>
+      internals are re-pointed at <code>/v1/chat</code>, mapping the router's
+      <code>{text, model, usage}</code> back into that envelope. Nothing above the class knows.</li>
+  <li><code>setContext()</code> → <code>logUsage()</code> → <code>AiUsage::record()</code> keeps
+      working: the router returns both <code>model</code> (the link that actually answered) and
+      <code>usage</code>, which is exactly what the cost ledger reads today.</li>
+  <li>Two new constants: <code>R1V_LLM_ROUTER_URL</code> and <code>R1V_LLM_ROUTER_TOKEN</code>.
+      <code>R1V_LLM_MODEL</code> becomes <code>R1V_LLM_TIER</code> = <code>low</code>.</li>
+  <li>The bundled <code>LlmTiers.php</code> gains <code>json_mode</code> and
+      <code>max_completion_tokens</code> — the content path calls <code>setMaxTokens(8000)</code>
+      and the router would otherwise silently cap it at 4000.</li>
+  <li><code>SpamScoreService</code>'s <code>setSystem()</code> becomes a <code>{role:"system"}</code>
+      message. Safe on the Azure links; see the risk note.</li>
+  <li><strong>Out of scope, do not touch:</strong> <code>OpenAiModerationService</code> (moderation
+      endpoint), <code>FalAiService</code> (images/video), and
+      <code>docs/seo/site-graph/embed_views.php</code> (WP-CLI embeddings). These use
+      <code>AiGatewayService</code> directly and the router has no equivalent for two of the three.</li>
+</ul>
+
+<h4>What gets deleted</h4>
+<p>Nothing at cutover. In a later commit, once it has run a week: <code>LlmService</code>'s
+per-provider branches (<code>parseAnthropicContent</code>, the <code>google-ai-studio</code> and
+<code>anthropic</code> URL/body shapes, the response-shape sniffing at line 229) — roughly half the
+class. The <code>gpt-4o-mini</code> legacy row in <code>AiCreditsService</code> can go at the same
+time. <code>AiGatewayService</code> <strong>stays</strong> — moderation, fal and embeddings still
+need it.</p>
+
+<h4>Risk <span class="tag t-good">low</span></h4>
+<ul>
+  <li>The AJAX helpers are guest-reachable and one of them has no rate limit. The router adds a hop
+      but the token is server-side and never reaches the browser, so exposure is unchanged.</li>
+  <li>The system message is the only real behavioural unknown: if the chain falls through to the
+      Anthropic link, a <code>system</code> role is invalid in that dialect and the link fails. That
+      is a fail-open spam check, not a broken page — but it is the thing to watch.</li>
+  <li><code>TIMEOUT = 30</code> now covers two hops. Worth raising to 45 on the content path.</li>
+</ul>
+
+<h4>How to verify</h4>
+<p>There is no test harness for this code — no WP-CLI command, no test references LLM at all — so
+verification is <code>wp eval</code> on DDEV plus the browser:</p>
+<pre><code>ddev wp eval 'var_dump(Route1Views\Support\SiteConfig::llmTier());'
+ddev wp eval '$l=new Route1Views\Application\Services\LlmService();
+              var_dump($l->setContext("spam_score")->complete("Return JSON {\"ok\":true}"));'
+ddev wp eval 'var_dump(Route1Views\Application\Services\SpamScoreService::analyzeView(&lt;postId&gt;));'</code></pre>
+<p>Then drive the <code>/create/</code> wizard with the <code>route1views</code> skill's auth-cookie
+harness and watch <code>wp-content/debug.log</code> for the <code>LLM: Response received in Xs</code>
+lines. Confirm in the Cloudflare AI Gateway log that the calls now carry
+<code>{"project":"route1views"}</code> and that <code>AiUsage</code> rows still record a real model
+id rather than the tier alias.</p>
+
+<h4>Rollback</h4>
+<p>Set <code>R1V_LLM_MODEL</code> back to <code>dynamic/low</code> in <code>wp-config.php</code>.
+No deploy, no code change — the Dynamic Route is untouched and still live. This is why the deletion
+commit must come later.</p>
+</div>
+
+<div class="app">
+<h3>2–3 · aigw.py, the shared Python client</h3>
+
+<h4>What it does today</h4>
+<p>357 lines, of which ~150 build provider chains locally from a bundled <code>tiers.json</code>.
+Eight consumer repos import it: <code>og-studio</code> (<code>achat</code>),
+<code>familybook</code> (<code>chat</code> ×4 with <code>images=</code> and <code>temperature=</code>,
+plus <code>embed</code> ×3), <code>living-chart</code> (3 scripts, <code>bulk</code>),
+<code>front-door</code> (optional import, <code>bulk</code>),
+<code>helloplaydate/scripts/build_pin_spec.py</code> (<code>bulk</code>), and this repo's own
+<code>selftest.py</code> and <code>stress.py</code>.</p>
+
+<h4>What changes</h4>
+<ul>
+  <li><code>chat</code> / <code>achat</code> / <code>embed</code> / <code>aembed</code> keep their
+      signatures and their return contracts — including <code>json_mode=True</code> returning a
+      parsed dict with the markdown-fence salvage. Only the body becomes
+      <code>POST /v1/chat</code> and <code>POST /v1/embed</code>.</li>
+  <li>New env var <code>LLM_TIERS_TOKEN</code>; <code>CF_AIG_TOKEN</code>, <code>CF_ACCOUNT_ID</code>
+      and <code>AZURE_RESOURCE</code> stop being needed by the client (they remain needed by
+      anything calling the gateway directly).</li>
+  <li>Do this in two waves. <strong>Wave A</strong> is every plain-text caller — living-chart,
+      front-door, the build-pin script, og-studio. <strong>Wave B</strong> is
+      <code>images=</code> and <code>temperature=</code>, and cannot start until the Worker supports
+      both; today a <code>temperature</code> is silently dropped and a vision call only works if
+      Azure happens to answer.</li>
+  <li><code>_DEPRECATED_TIERS</code> (<code>offload</code>→<code>bulk</code>) moves into the Worker,
+      or gets a removal date. It is cruft on a timer either way.</li>
+</ul>
+
+<h4>What gets deleted</h4>
+<ul>
+  <li><code>build_chain</code>, <code>_element</code>, <code>_endpoint</code>, <code>_headers</code>,
+      <code>_extract_text</code>, the module-level <code>_SPEC</code>/<code>TIERS</code> load —
+      about 150 lines.</li>
+  <li><strong><code>profiles</code>, <code>PROFILES</code>, <code>_ordered()</code> and the
+      <code>profile=</code> keyword. Confirmed dead.</strong> A grep across <code>~/Projects</code>
+      and <code>~/Sites</code> finds exactly three mentions outside <code>aigw.py</code> itself:
+      two in <code>scripts/selftest.py</code>, which tests the feature and nothing else, and one
+      line of README. No application anywhere passes <code>profile=</code>. Delete the feature, its
+      selftest block, the README line, and the <code>profiles</code> object in
+      <code>tiers.json</code> — but <em>keep</em> the <code>policies</code> block, which is the same
+      idea done properly and is the intended replacement.</li>
+  <li>The chain tables restated in README and the <code>using-llms</code> / <code>offload</code>
+      skill docs. Replace with "ask <code>/v1/tiers</code>".</li>
+</ul>
+
+<h4>Risk <span class="tag t-warn">medium</span></h4>
+<p>Not from any one call site — from the count. Eight repos share one file, and if the wrapper
+changes a return contract subtly (a dict where a string was, an exception type) it breaks all eight
+at once, in scripts that mostly run unattended. The mitigation is that the public signatures do not
+move, and that <code>TierError</code> stays the single exception type.</p>
+<p>The specific trap: <code>familybook</code> passes <code>temperature=0.1</code> and
+<code>0.2</code> deliberately. Migrating it before the Worker accepts <code>temperature</code> would
+silently return non-deterministic output from a call site that asked for near-determinism — a
+regression with no error attached to it. Hence the two waves.</p>
+
+<h4>How to verify</h4>
+<p><code>python3 scripts/selftest.py</code> is the harness and already checks json_mode, vision and
+embeddings across every tier, plus reads the gateway log back to see which provider actually
+answered. Run it before and after and diff. Then re-run one real job per repo against known input —
+<code>living-chart</code>'s <code>audit_coords.py</code> and <code>familybook</code>'s
+<code>bias.py</code> are the two with the most distinctive output shapes.</p>
+
+<h4>Rollback</h4>
+<p><code>git revert</code> in <code>ai-gateway-tiers</code>, then reinstall
+(<code>pip install -e client</code>) in each consumer. No consumer repo changes at all in wave A, so
+there is only one thing to revert. Keep the deleted chain-expansion code recoverable in git history
+rather than trying to keep both paths live in the file.</p>
+</div>
+
+<div class="app">
+<h3>4–5 · cnx-cinema</h3>
+
+<h4>What it does today</h4>
+<p><code>services/LlmService.js</code> reads a vendored <code>services/tiers.json</code> at import
+time and builds the gateway attempt array itself. The vendored chains are, checked today,
+<strong>byte-identical</strong> to the canonical file — the drift is in the surrounding doctrine
+(<code>policies</code>, <code>capabilities</code>, <code>routes</code>, <code>profiles</code> are all
+missing), not the models. Two real callers:</p>
+<ul>
+  <li><strong><code>enrichment/tmdb.js</code></strong> — title identification fallback, tier
+      <code>low</code>, plain text out, own JSON parsing, no tools. Returns <code>null</code> on any
+      failure and the pipeline continues.</li>
+  <li><strong><code>enrichment/reviewer/index.js</code></strong> — the nightly QA reviewer, tier
+      <code>high</code>, a system prompt, TMDB function tools, up to 16 tool rounds, one retry on an
+      unparseable reply. Because <code>tools</code> is set, <code>buildChain</code> drops the
+      Google and Anthropic steps, so this path is effectively Azure-only already.</li>
+</ul>
+
+<h4>What changes</h4>
+<ul>
+  <li><strong>Step 4:</strong> <code>tmdb.js</code>'s <code>askLlm</code> calls the router. Fifteen
+      lines of <code>fetch</code>. <code>LlmService.js</code> stays exactly as it is for the
+      reviewer.</li>
+  <li><strong>Step 5, later:</strong> the reviewer moves only once <code>/v1/chat</code> can carry
+      <code>tools</code>, tool results and a system prompt across rounds. Until then it is the
+      reason the file exists.</li>
+  <li>Env: add <code>LLM_TIERS_TOKEN</code> to <code>/root/.secrets.env</code> on the VPS.
+      While in there — <code>.env.example</code> is badly stale (it still documents
+      <code>GEMINI_API_KEY</code> and <code>LLM_ROUTE=gemini-flash-lite</code>) and omits
+      <code>AZURE_RESOURCE</code>, which <code>isConfigured()</code> requires. If that variable is
+      missing on the box the reviewer skips silently. Worth fixing in the same pass.</li>
+</ul>
+
+<h4>What gets deleted</h4>
+<p><strong>Not at step 4.</strong> <code>services/tiers.json</code> and the whole of
+<code>buildChain</code>/<code>buildElement</code>/<code>extractMessage</code> can only be deleted
+after step 5, because the reviewer needs them. Deleting the file at step 4 — as the architecture
+review's cruft list implies — would take the nightly QA offline. At step 5 the deletion is the whole
+file plus roughly two-thirds of <code>LlmService.js</code>.</p>
+
+<h4>Risk</h4>
+<p><span class="tag t-warn">medium</span> for step 4: the caller already treats <code>null</code> as
+routine, so the worst realistic outcome is TMDB fallback identification stopping — degraded
+enrichment, not an outage. The real cost is the deploy shape: this runs in a Docker container on the
+pressive.in VPS, auto-deployed on push to master, and <code>services/</code> is
+<code>COPY</code>-ed into the image. Every change is a rebuild, and rollback is a redeploy rather
+than a config flip.</p>
+<p><span class="tag t-bad">high</span> for step 5: a 16-round tool loop reimplemented behind an HTTP
+boundary is a genuine rewrite, on the path that produces the QA digest. Do not attempt it as part of
+this migration.</p>
+
+<h4>How to verify</h4>
+<pre><code># cheapest — resolves the tier and prints the chain, no network
+node -e "import('./services/LlmService.js').then(m=>console.log(m.getModel('reviewer'), m.isConfigured()))"
+
+node enrichment/reviewer-sandbox/loop-test.js     # offline, no keys
+bash scripts/smoketest.sh                          # the CI gate
+node enrichment/reviewer-sandbox/run.js            # 8 fixtures, live LLM, in-memory DB
+node enrichment/reviewer/cli.js --dry-run          # prod data, no writes, no email</code></pre>
+<p>Note that <code>npm test</code> does <em>not</em> cover the LLM path, and the <code>/health</code>
+endpoint passes with a completely broken gateway config. Neither is a valid check here.</p>
+
+<h4>Rollback</h4>
+<p>Revert the commit and let the master-push Action redeploy; or on the box,
+<code>git checkout</code> the previous ref and <code>docker compose up -d --build</code>. Budget
+minutes, not seconds — which is another reason this is not the canary.</p>
+</div>
+
+<div class="app stopped">
+<h3>— · helloplaydate <span class="tag t-bad">do not migrate</span></h3>
+
+<div class="stop">
+<p><strong>The premise was that its justification had expired. It has not.</strong> The decision doc
+does not say "attribution by project" — it says per-user attribution, and that is what the code
+does. The Worker forwards <code>{project: &lt;app&gt;}</code> only, and when a per-app token is used
+it <em>overrides</em> whatever the caller sends. There is currently no way to carry a
+<code>user_id</code> through it.</p>
+</div>
+
+<h4>What is actually riding on the current implementation</h4>
+<ul>
+  <li><strong>Per-user attribution.</strong> <code>cf-aig-metadata</code> carries
+      <code>request_id</code>, <code>user_id</code> or a truncated salted <code>ip_hash</code>,
+      <code>booklet_id</code>, plus <code>kind</code>/<code>tier</code>/<code>model</code> per link —
+      bound from an ambient contextvar in <code>app/main.py</code> and
+      <code>app/services/jobs.py</code>. A guard test asserts the header literal appears in exactly
+      one module. Losing this is losing the ability to say which customer cost what.</li>
+  <li><strong>The <code>gate</code> tier.</strong> Deliberately Anthropic-Haiku-first against an
+      otherwise universal Azure-first policy, because four modules carry numeric thresholds fit to
+      Haiku's output distribution — <code>likeness_gate</code> (<code>HAIR_MIN 0.55</code>,
+      <code>SKIN_SEVERE 0.25</code>, <code>OVERALL_MIN 0.55</code>,
+      <code>ANCHOR_OVERALL_MIN 0.62</code> with AUC-derived weights),
+      <code>identity_check</code> (<code>IDENTITY_MIN 0.66</code> — "the knee of an ROC table",
+      <code>ANCHOR_IDENTITY_MIN 0.70</code>, <code>AGE_GAP_HARD 4.0</code>),
+      <code>face_check</code>, and <code>vision_meta</code>'s model-keyed price table. All of these
+      degrade <em>open</em>, and the entire test suite feeds canned replies — so a re-route that
+      breaks them returns 200, passes every test, and is invisible until a customer receives a
+      whitewashed or wrong-child render. <strong>Do not touch this tier.</strong></li>
+  <li><strong>Things the router has no field for:</strong> per-link timeouts (the stated reason a
+      gateway-side route was rejected), BYOK retry on 401/402/403 with a provider-scoped key
+      whitelist, <code>json_mode</code> treated as a <em>failover criterion</em> rather than a
+      request flag (a 200 carrying prose counts as a failed link), <code>temperature</code> with a
+      per-model <code>_REJECTS_TEMPERATURE</code> exclusion table, normalised token usage feeding a
+      persisted cost ledger, batched embeddings, a runtime assertion that <code>bulk</code> stays
+      Azure-only, and two test seams that seven business modules depend on.</li>
+  <li><strong>Missing tiers.</strong> KV has no <code>gate</code> and no <code>transcribe</code>.</li>
+</ul>
+
+<h4>What would have to be true to reconsider</h4>
+<ol>
+  <li><code>/v1/chat</code> accepts an arbitrary per-call <code>metadata</code> object and merges it
+      into <code>cf-aig-metadata</code> alongside the token-derived project — with the same privacy
+      contract the app enforces today (no raw IP, no email, size-capped).</li>
+  <li><code>gate</code> and <code>transcribe</code> exist in <code>tiers.json</code>, with
+      <code>gate</code> keeping its Anthropic-first order and a comment explaining why it violates
+      the house policy.</li>
+  <li><code>temperature</code>, <code>system</code>, images and per-link timeouts are supported.</li>
+  <li>The calibrated gates have been re-measured against whatever leads the chain — the bakeoff the
+      decision doc records as <em>deferred, not done</em>.</li>
+</ol>
+<p>That is four prerequisites, one of which is a measurement campaign against corpora that partly do
+not exist. The natural moment is the credit cliff around 21 Sep 2026, which the decision doc already
+names as the review point. Until then the honest answer is that helloplaydate's implementation is
+not duplication — it is a superset, and the router is the thing that is missing features.</p>
+
+<h4>What can be done now, cheaply</h4>
+<p>One thing only, and it is not a migration: <code>scripts/build_pin_spec.py</code> imports the
+shared <code>aigw</code> client for a <code>bulk</code> call. That rides along with the
+<code>aigw.py</code> work in step 2 and touches none of the above.</p>
+</div>
+
+<h2>Recommended first move</h2>
+
+<div class="verdict">
+<p><strong>route1views.</strong> It is the only consumer where every call site already treats an LLM
+failure as a normal outcome, so a router outage during the canary period degrades UX instead of
+breaking a flow — which is what makes it safe to run ahead of the client fallback. It is three call
+sites behind a single class, so the change is contained. Rollback is one constant in
+<code>wp-config.php</code> with no deploy. And it is the consumer that proves the thing the router
+was built for: a PHP app naming a tier, which was impossible before.</p>
+<p>Give it a week of real traffic before deleting anything, and use that week to write the client
+fallback chain that everything after it should depend on.</p>
+</div>
+
+<p class="foot">
+  Router: <code>~/Projects/llm-tiers-worker</code> · <code>https://llm-tiers.kristifer-szabo.workers.dev</code><br>
+  Source of truth: <code>~/Projects/ai-gateway-tiers/tiers.json</code> · push live with <code>./sync.sh</code><br>
+  Companion: <a href="architecture-2026-08-08.html">architecture-2026-08-08.html</a> — note its defect
+  list items 4, 5 and 6 are now closed, and its cruft list overstates the cnx-cinema and helloplaydate
+  deletions.<br>
+  Read 8 Aug 2026: <code>src/index.js</code>, <code>tiers.json</code>, <code>client/aigw.py</code>,
+  <code>cnx-cinema/services/{tiers.json,LlmService.js}</code> + callers,
+  <code>helloplaydate/app/services/ai_gateway.py</code> + its ADR,
+  <code>route1views</code> <code>LlmService.php</code> / <code>AiGatewayService.php</code> + callers.
+  kboodle excluded by policy — it runs on the client's own Cloudflare account and must never use this router.
+</p>
+
+</main>
+</body>
+</html>

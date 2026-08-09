@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The whole estate — every model-calling surface, 8 Aug 2026</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root { --ink:#16181d; --mid:#5a6272; --line:#dfe3ea; --bg:#fbfbfc;
+          --good:#1f7a4d; --warn:#a86400; --bad:#a8322a; --accent:#1f2be0; }
+  * { box-sizing:border-box }
+  body { margin:0; padding:48px 24px 96px; background:var(--bg); color:var(--ink);
+         font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  main { max-width:920px; margin:0 auto }
+  h1 { font-size:34px; line-height:1.15; letter-spacing:-.02em; margin:0 0 6px }
+  .sub { color:var(--mid); font-size:15px; margin:0 0 40px }
+  h2 { font-size:24px; letter-spacing:-.01em; margin:52px 0 14px; padding-top:22px; border-top:1px solid var(--line) }
+  h3 { font-size:17px; margin:28px 0 8px }
+  p, li { color:#23262d }
+  code { font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; background:#eef0f4;
+         padding:1px 5px; border-radius:4px; }
+  pre { background:#16181d; color:#e8eaf0; padding:16px 18px; border-radius:8px; overflow-x:auto;
+        font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  pre code { background:none; padding:0; color:inherit }
+  table { border-collapse:collapse; width:100%; margin:18px 0; font-size:14.5px }
+  th,td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top }
+  th { font-size:12px; text-transform:uppercase; letter-spacing:.07em; color:var(--mid); font-weight:600 }
+  .inv { font-size:13.5px }
+  .inv td { padding:7px 9px }
+  .inv code { font-size:12.5px; padding:0 3px }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:20px 24px; margin:22px 0 }
+  .mermaid { background:#fff; border:1px solid var(--line); border-radius:10px; padding:22px; margin:22px 0; text-align:center }
+  .tag { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+         padding:2px 8px; border-radius:99px; vertical-align:2px; white-space:nowrap }
+  .t-good { background:#e4f3ea; color:var(--good) } .t-warn { background:#fbf0dd; color:var(--warn) }
+  .t-bad  { background:#fbe6e4; color:var(--bad) }
+  .t-dead { background:#eceef2; color:#6b7280 }
+  .lede { font-size:18px; line-height:1.6; color:#2c3038 }
+  .verdict { border-left:3px solid var(--accent); padding-left:18px; margin:26px 0 }
+  ul { padding-left:22px } li { margin:5px 0 }
+  .foot { margin-top:64px; padding-top:20px; border-top:1px solid var(--line); color:var(--mid); font-size:13px }
+  .grp td { background:#f3f4f8; font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.07em; color:var(--mid) }
+  .num { font-variant-numeric:tabular-nums }
+</style>
+</head>
+<body>
+<main>
+
+<h1>The whole estate</h1>
+<p class="sub">Integration map — 8 August 2026 · every surface that calls a model, and what the router must grow to take it</p>
+
+<p class="lede">The migration plan looked at four consumers. A grep across <code>~/Projects</code> and
+<code>~/Sites</code> finds <strong>twenty-one repos</strong> containing <strong>sixty-one</strong>
+distinct model-calling surfaces. The four in the plan account for eleven of them. This document is the
+other fifty — and the honest news is that only a quarter of the estate is blocked by anything
+interesting. Most of it is blocked by <code>temperature</code>.</p>
+
+<div class="card">
+<p><strong>The headline number.</strong> Of 61 surfaces: <strong>17 can migrate</strong> (4 of them
+today, with no router change at all), <strong>25 are blocked</strong> on a named router gap,
+<strong>13 must stay separate</strong> for a good reason, and <strong>6 are dead code</strong> that
+should be deleted rather than migrated.</p>
+<p>Two thirds of the blocked set are waiting on <em>two</em> gaps: vision image input (10 surfaces)
+and tool calling (7). Nothing else blocks more than five.</p>
+</div>
+
+<p>This extends <a href="migration-plan.html">migration-plan.html</a> and
+<a href="fallback-plan.html">fallback-plan.html</a> rather than repeating them. Where a surface is
+already covered there, the row says so and moves on. Everything else is new.</p>
+
+<h2>What the sweep changed</h2>
+
+<p>Five findings that were not visible from the four-consumer view:</p>
+
+<table>
+<tr><th>Finding</th><th>Consequence</th></tr>
+
+<tr><td><strong>route1views has three hand-rolled failover ladders in Python</strong> —
+<code>classify_views.py</code>, <code>name_clusters.py</code> and <code>tools/experiences/label_photos.py</code>,
+all with the identical shape <code>dynamic/low ×N → azure gpt-5.4</code>, all reading
+<code>CF_ACCOUNT_ID</code>/<code>CF_AIG_TOKEN</code> from env, all spoofing a curl User-Agent, none
+touching <code>AiUsage</code>.</td>
+<td><span class="tag t-good">helps</span> These are pure duplication of what the Worker exists to
+own, in a repo that is already the canary. Two of the three are plain chat and can move in the same
+week as the canary. That is the cheapest real deletion available anywhere in the estate.</td></tr>
+
+<tr><td><strong>The migration plan undercounts route1views by one.</strong>
+<code>EventDigest.php:104</code> constructs <code>new LlmService()</code> with
+<code>setMaxTokens(160)</code> and is not in the three-call-site list. <code>SpamScoreService</code>
+is also two surfaces in one file — the LLM quality score and the moderation adapter.</td>
+<td><span class="tag t-warn">widens</span> The canary is 4 call sites, not 3, and it reinforces
+<code>max_completion_tokens</code> as a prerequisite rather than a nicety.</td></tr>
+
+<tr><td><strong>familybook does not use <code>aigw.embed</code> at all.</strong> Both
+<code>embed()</code> functions (<code>enrich.py</code>, <code>concepts.py</code>) are local
+open_clip ViT-B-32 on MPS — image and text embeddings computed on the GPU, never a network call.</td>
+<td><span class="tag t-good">helps</span> The plan's "embed ×3" is wrong; there is no embedding
+migration in familybook. What familybook would need is an <em>image</em>-embedding capability the
+router has no concept of, so this stays local forever. Its actual blockers are
+<code>images=</code> and <code>temperature=</code> only.</td></tr>
+
+<tr><td><strong>Three repos already call Anthropic through CF unified billing with a literal
+placeholder key</strong> — profilo (custom <code>httpx</code> transport that strips
+<code>x-api-key</code>), social-brain-mcp (<code>api_key="unified-billing"</code>), places-scout
+(same string, in Node). Each solved the same problem independently.</td>
+<td><span class="tag t-warn">widens</span> This is the router's own value proposition being
+re-implemented three times in two languages. It is also the most migratable code in the estate —
+the callers already think in terms of "a cheap model" and "the gateway holds the key".</td></tr>
+
+<tr><td><strong>living-chart is two surfaces, not one.</strong> Four scripts are on
+<code>aigw</code> (the plan says three; <code>fix_event_locations.py</code> is the fourth and even
+exposes <code>--tier</code>). Six <em>more</em> atlas scripts bypass everything via a hand-rolled
+<code>scripts/atlas/azure_client.py::chat_json</code> hitting Azure directly with a raw
+<code>api-key</code> header.</td>
+<td><span class="tag t-bad">gap</span> That client is the largest remaining direct-to-Azure surface
+in the estate, and its blocker is small and specific: strict <code>json_schema</code> (the router
+has this), per-model <code>reasoning_effort</code> (it does not), and a returned usage tuple.</td></tr>
+</table>
+
+<h2>The inventory</h2>
+
+<p>Sixty-one surfaces, grouped by repo. "Pays" is whose money leaves the building:
+<strong>AZ</strong> = Kris's Microsoft-for-Startups Azure credits (expire ~21 Sep 2026),
+<strong>CF</strong> = Kris's Cloudflare unified billing, <strong>KEY</strong> = Kris's own provider
+key (fal, OpenAI, Cerebras, Deepgram, ElevenLabs, Google Cloud), <strong>MODAL</strong> = Kris's
+Modal GPU spend, <strong>CLIENT</strong> = billed to a client's own account.</p>
+
+<table class="inv">
+<tr><th>Surface</th><th>Lang</th><th>Capability</th><th>Blocked on</th><th>Pays</th><th>Verdict</th></tr>
+
+<tr class="grp"><td colspan="6">route1views theme — PHP + ops Python · live, HEAD 66 min old</td></tr>
+<tr><td><code>Application/Services/LlmService.php</code> — 4 call sites (CreatorHelpers, category suggestions, SpamScore, <strong>EventDigest</strong>)</td><td>PHP</td><td>chat</td><td>—</td><td>CF/AZ</td><td><span class="tag t-good">migrate</span> canary, planned</td></tr>
+<tr><td><code>docs/seo/site-graph/classify_views.py</code></td><td>Python</td><td>chat</td><td>—</td><td>CF/AZ</td><td><span class="tag t-good">migrate</span> deletes a ladder</td></tr>
+<tr><td><code>docs/seo/site-graph/name_clusters.py</code></td><td>Python</td><td>chat</td><td>—</td><td>CF/AZ</td><td><span class="tag t-good">migrate</span> deletes a ladder</td></tr>
+<tr><td><code>docs/seo/site-graph/embed_views.php</code> (WP-CLI, text-embedding-3-small, batch 96)</td><td>PHP</td><td>embed</td><td>batching; PHP client has no embed method</td><td>CF</td><td><span class="tag t-good">migrate</span> <code>/v1/embed</code> exists</td></tr>
+<tr><td><code>tools/experiences/label_photos.py</code></td><td>Python</td><td>vision</td><td><strong>vision input</strong></td><td>CF/AZ</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td><code>Infrastructure/External/OpenAiModerationService.php</code> (omni-moderation, fail-open)</td><td>PHP</td><td>moderation</td><td><strong>no moderation capability</strong></td><td>CF</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td><code>FalAiService::editImage()</code> — nano-banana/edit</td><td>PHP</td><td>image-edit</td><td>image params (model slug, size)</td><td>KEY (fal, in gateway)</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td><code>FalAiService::removeBackground()</code> — BRIA</td><td>PHP</td><td>image-edit</td><td>image params</td><td>KEY</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td><code>FalAiService::imageToVideo()</code> — ltx-video</td><td>PHP</td><td>video</td><td>—</td><td>—</td><td><span class="tag t-dead">dead</span> zero callers</td></tr>
+<tr><td><code>Infrastructure/External/GoogleVisionService.php</code> — Cloud Vision web-detection</td><td>PHP</td><td>vision (reverse image)</td><td>n/a</td><td>KEY (Google Cloud, SA JSON on disk)</td><td><span class="tag t-bad">keep separate</span> not a gateway provider</td></tr>
+<tr><td><code>MediaStudioRestController::dispatchGooserJob/dispatchDuckerJob</code></td><td>PHP</td><td>ML compute</td><td>n/a</td><td>MODAL/VPS</td><td><span class="tag t-bad">keep separate</span> own containers, not a model API</td></tr>
+
+<tr class="grp"><td colspan="6">ai-gateway-tiers <code>aigw.py</code> consumers — Python · the shared client</td></tr>
+<tr><td>og-studio <code>app/services/llm_service.py::suggest_variants</code></td><td>Python</td><td>chat</td><td>—</td><td>CF/AZ</td><td><span class="tag t-good">migrate</span> already router-shaped</td></tr>
+<tr><td>front-door <code>digest.py::ask</code> (5-min scan loop)</td><td>Python</td><td>chat</td><td>— (escape-hatch path uses temperature)</td><td>AZ</td><td><span class="tag t-good">migrate</span> already router-shaped</td></tr>
+<tr><td>living-chart <code>scripts/verify/caption_claim_audit.py</code></td><td>Python</td><td>chat</td><td>—</td><td>AZ</td><td><span class="tag t-good">migrate</span></td></tr>
+<tr><td>living-chart <code>scripts/atlas/audit_coords.py</code></td><td>Python</td><td>chat</td><td>—</td><td>AZ</td><td><span class="tag t-good">migrate</span></td></tr>
+<tr><td>living-chart <code>scripts/atlas/fix_event_locations.py</code> (<code>--tier</code>)</td><td>Python</td><td>chat</td><td>—</td><td>AZ</td><td><span class="tag t-good">migrate</span></td></tr>
+<tr><td>living-chart <code>scripts/atlas/auto_fit.py</code> (<code>images=</code>, tier <code>high</code>)</td><td>Python</td><td>vision</td><td><strong>vision input</strong></td><td>AZ</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td>helloplaydate <code>scripts/build_pin_spec.py</code></td><td>Python</td><td>chat</td><td>—</td><td>AZ</td><td><span class="tag t-good">migrate</span> the one bit of hpd that moves</td></tr>
+<tr><td>familybook <code>bias.py</code></td><td>Python</td><td>vision</td><td><strong>vision</strong> + temperature</td><td>AZ</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td>familybook <code>interest.py</code></td><td>Python</td><td>vision</td><td><strong>vision</strong> + temperature</td><td>AZ</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td>familybook <code>polish.py</code></td><td>Python</td><td>vision</td><td><strong>vision</strong> + temperature</td><td>AZ</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td>familybook <code>nlquery.py</code></td><td>Python</td><td>chat</td><td>temperature only</td><td>AZ</td><td><span class="tag t-warn">blocked</span> trivially</td></tr>
+<tr><td>familybook <code>enrich.py</code>/<code>concepts.py</code> — local open_clip ViT-B-32 on MPS</td><td>Python</td><td>image+text embed</td><td>no image-embed capability, and none wanted</td><td>free (local GPU)</td><td><span class="tag t-bad">keep separate</span></td></tr>
+
+<tr class="grp"><td colspan="6">living-chart, second surface — direct Azure, bypasses everything</td></tr>
+<tr><td><code>scripts/atlas/azure_client.py::chat_json</code> — driving <code>extract.py</code>, <code>extract_events.py</code>, <code>extract_tactics.py</code> (×2), <code>build_book_routes.py</code>, <code>geocode.py</code></td><td>Python</td><td>chat (strict JSON)</td><td><code>reasoning_effort</code> passthrough; usage tuple</td><td>AZ (raw key, no gateway)</td><td><span class="tag t-good">migrate</span> largest direct-Azure surface left</td></tr>
+
+<tr class="grp"><td colspan="6">cnx-cinema — Node · VPS Docker · HEAD 6 h old</td></tr>
+<tr><td><code>enrichment/tmdb.js::askLlm</code></td><td>Node</td><td>chat</td><td>—</td><td>CF/AZ</td><td><span class="tag t-good">migrate</span> planned step 4</td></tr>
+<tr><td><code>enrichment/reviewer/index.js</code> — 16-round tool loop</td><td>Node</td><td>chat + tools</td><td><strong>tool calling</strong>, system prompt</td><td>AZ</td><td><span class="tag t-warn">blocked</span> planned step 5</td></tr>
+
+<tr class="grp"><td colspan="6">social-brain-mcp — Python/FastAPI+MCP · VPS <code>/srv/social-brain</code> · content for cnxlocal, pressiveweb, helloplaydate</td></tr>
+<tr><td><code>app/services/llm.py::generate_post_pack</code> / <code>regenerate_post</code></td><td>Python</td><td>chat (JSON)</td><td><code>max_tokens</code>; usage back for <code>_compute_cost</code></td><td>CF</td><td><span class="tag t-good">migrate</span></td></tr>
+<tr><td><code>app/services/voice_extractor.py::extract</code> — <code>VOICE_PROFILE_TOOL</code></td><td>Python</td><td>chat + tools</td><td><strong>tool calling</strong></td><td>CF</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td><code>app/services/brandkit_agent.py</code> — 7 tool defs + base64 PNG self-review</td><td>Python</td><td>tools + vision</td><td><strong>tools</strong> + <strong>vision</strong></td><td>CF</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td><code>app/services/generation.py::_call_fal</code> + <code>graphics.py::resolve_model</code></td><td>Python</td><td>image</td><td>per-call model slug, steps, image_size, seed, aspect</td><td>KEY (fal)</td><td><span class="tag t-warn">blocked</span></td></tr>
+
+<tr class="grp"><td colspan="6">places-scout — Node ESM · feeds cnxlocal · HEAD 3 d old</td></tr>
+<tr><td><code>pipeline/src/enrich/claude-extraction.js::extractAllPlaces</code></td><td>Node</td><td>chat</td><td><code>max_tokens</code>, system prompt</td><td>CF (optional BYOK = cnxlocal client key)</td><td><span class="tag t-good">migrate</span></td></tr>
+<tr><td><code>pipeline/src/enrich/photo-analysis.js::analyzeAllPhotos</code></td><td>Node</td><td>vision</td><td><strong>vision</strong> (multi-image base64)</td><td>CF</td><td><span class="tag t-warn">blocked</span></td></tr>
+
+<tr class="grp"><td colspan="6">profilo — Python/FastAPI · Docker, deployed · HEAD 6 h old</td></tr>
+<tr><td><code>app/services/scan.py::analyze_image</code> (bag scan)</td><td>Python</td><td>vision</td><td><strong>vision</strong>; Anthropic-native content blocks</td><td>CF</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td><code>app/routers/batch.py::_parse_with_llm</code> (spreadsheet parse)</td><td>Python</td><td>chat</td><td><code>max_tokens</code></td><td>CF</td><td><span class="tag t-good">migrate</span></td></tr>
+<tr><td><code>docs/logo-explorations/round-{1,2,3}/run.py</code> — fal Ideogram v3</td><td>Python</td><td>image</td><td>—</td><td>KEY</td><td><span class="tag t-dead">dead</span> archived one-off</td></tr>
+
+<tr class="grp"><td colspan="6">family-brain — TypeScript · deployed CF Worker + Durable Object, crons hourly + daily</td></tr>
+<tr><td><code>src/llm.ts::runAnthropic</code> — agentic tool loop, <code>maxIterations</code></td><td>TS/Worker</td><td>chat + tools</td><td><strong>tools</strong>, escalating temperature</td><td>CF</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td><code>src/llm.ts::runGemini</code> — same loop, hand-written schema translation</td><td>TS/Worker</td><td>chat + tools</td><td><strong>tools</strong>, temperature</td><td>CF</td><td><span class="tag t-warn">blocked</span></td></tr>
+
+<tr class="grp"><td colspan="6">cnx-bank-deals — Python/FastAPI · launchd daily 09:00 + APScheduler</td></tr>
+<tr><td><code>app/services/enrich_llm.py::_enrich_one</code></td><td>Python</td><td>chat + <strong>server-side web search</strong></td><td><code>web_search_20260209</code> server tool, <code>output_config</code>, <code>cache_control</code> prompt caching, <code>stop_reason</code></td><td>CF</td><td><span class="tag t-bad">keep separate</span> the value <em>is</em> the Anthropic-native path</td></tr>
+
+<tr class="grp"><td colspan="6">video-gen — Python/FastAPI + Modal GPU · HEAD 2 w old, live</td></tr>
+<tr><td><code>app/services/scripting.py::shotlist_from_script</code> — forced <code>_SHOTLIST_TOOL</code></td><td>Python</td><td>chat + tools</td><td><strong>tools</strong> (not a json_schema drop-in)</td><td>CF, BYOK fallback</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td><code>app/services/azure_gen.py::azure_image</code> — FLUX.1-Kontext-pro, bypasses gateway</td><td>Python</td><td>image</td><td>size, <code>n</code>, b64-or-URL dual response</td><td>AZ</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td><code>app/services/generation.py::_generate_image_fal</code> — flux/schnell queue</td><td>Python</td><td>image</td><td>image params, queue + long poll</td><td>KEY (fal)</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td><code>app/services/qc.py::_vlm_call</code> — fal any-llm/vision</td><td>Python</td><td>vision</td><td><strong>vision</strong>, queue + poll</td><td>KEY</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td><code>scripts/qa_review.py::_call_model</code> — multi-frame screen→arbiter escalation</td><td>Python</td><td>vision</td><td><strong>vision</strong>, two-model escalation</td><td>CF</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td><code>app/services/generation.py::generate_clip</code> — Modal LTX-Video / Wan2.2 I2V</td><td>Python+Modal</td><td>video</td><td>video capability, binary upload, 30-min timeouts</td><td>MODAL</td><td><span class="tag t-bad">keep separate</span> self-hosted GPU; video failover is <code>opt-in-only</code> by policy</td></tr>
+<tr><td><code>scripts/autolayer.py</code> — fal birefnet matting</td><td>Python</td><td>image (matting)</td><td>not a router capability</td><td>KEY</td><td><span class="tag t-bad">keep separate</span></td></tr>
+<tr><td><code>app/services/tts.py</code> — Azure Speech / ElevenLabs / Modal Kokoro</td><td>Python</td><td>speech</td><td>SSML, binary audio out</td><td>AZ / KEY / MODAL</td><td><span class="tag t-bad">keep separate</span> out of scope</td></tr>
+
+<tr class="grp"><td colspan="6">media-factory · media-api · r1v-image-worker</td></tr>
+<tr><td>media-factory <code>providers/azure_vision.py::caption_image</code></td><td>Python</td><td>vision</td><td><strong>vision</strong>, <code>max_completion_tokens</code></td><td>AZ</td><td><span class="tag t-warn">blocked</span></td></tr>
+<tr><td>media-factory <code>providers/azure_tts.py::synthesize</code> — Speech SDK</td><td>Python</td><td>speech</td><td>word-boundary callbacks, WAV out</td><td>AZ</td><td><span class="tag t-bad">keep separate</span></td></tr>
+<tr><td>media-factory <code>providers/modal_music.py</code>, <code>modal_tts.py</code></td><td>Python</td><td>—</td><td>—</td><td>—</td><td><span class="tag t-dead">dead</span> stubs that raise</td></tr>
+<tr><td>media-api <code>app/backends/fal_collage.py::_call_real</code> — nano-banana/edit</td><td>Python</td><td>image-edit</td><td>multi-image binary upload, <code>subscribe()</code> job handle, artifact download</td><td>KEY (work for client R1V)</td><td><span class="tag t-bad">keep separate</span> job system, not a chat system</td></tr>
+<tr><td>media-api <code>app/backends/modal_faces.py</code> — analyze + swap</td><td>Python→Modal RPC</td><td>512-d face embed + image-edit</td><td>non-text embeddings, <code>.remote()</code> RPC not HTTP</td><td>MODAL</td><td><span class="tag t-bad">keep separate</span></td></tr>
+<tr><td>r1v-image-worker <code>src/index.ts::generateArt</code> — Azure gpt-image-1.5 <code>/images/edits</code></td><td>TS/Worker</td><td>image-edit</td><td>multipart FormData, <strong>up to 6 source images</strong>, size/quality/<code>n</code></td><td>AZ + CF</td><td><span class="tag t-warn">blocked</span> but never deployed — cheapest to bend</td></tr>
+
+<tr class="grp"><td colspan="6">thai — Python/FastAPI · half-migrated, 3 of 4 providers bypass the gateway</td></tr>
+<tr><td><code>backend/llm/{cerebras,gemini,ollama}.py::chat</code></td><td>Python</td><td>chat</td><td>temperature; low-latency lane the router has no tier for</td><td>KEY (Cerebras, Gemini)</td><td><span class="tag t-good">migrate</span> with a latency caveat</td></tr>
+<tr><td><code>backend/llm/groq.py::chat</code> — OpenAI SDK, <code>base_url=CF_AIG/groq</code></td><td>Python</td><td>chat</td><td>temperature</td><td>KEY via CF (BYOK)</td><td><span class="tag t-good">migrate</span></td></tr>
+<tr><td><code>backend/stt/{deepgram,typhoon,whisper_local}.py</code></td><td>Python</td><td>transcribe</td><td><strong>no transcribe capability, no <code>transcribe</code> tier in KV</strong></td><td>KEY (Deepgram)</td><td><span class="tag t-warn">blocked</span></td></tr>
+
+<tr class="grp"><td colspan="6">Excluded by rule or by evidence</td></tr>
+<tr><td>kboodle theme — <code>Config::cfAiGateway()</code> reading <code>KBOODLE_CF_AI_GATEWAY_ACCOUNT_ID</code> / <code>_ID</code> / <code>_TOKEN</code>; own <code>basic</code>/<code>clever</code> 2-tier table at <code>src/Config/config.php:64-92</code></td><td>PHP</td><td>chat + image</td><td>n/a</td><td><strong>CLIENT</strong> (kboodle's own CF account)</td><td><span class="tag t-bad">keep separate</span> exempt, verified</td></tr>
+<tr><td>helloplaydate <code>app/services/ai_gateway.py</code> (1445 lines) + its own <code>TIERS</code></td><td>Python</td><td>chat, vision, gate, transcribe</td><td>per-<em>user</em> metadata, per-link timeouts, BYOK retry, calibrated <code>gate</code> thresholds, <code>gate</code>+<code>transcribe</code> tiers absent from KV</td><td>AZ / CF</td><td><span class="tag t-bad">keep separate</span> confirmed — see below</td></tr>
+<tr><td><code>~/Sites/shared/litellm-deepseek</code> — LiteLLM proxy + <code>claude-model.sh</code> (<code>~/bin/claude-deepseek</code>)</td><td>Python proxy</td><td>chat (dev harness)</td><td>full Anthropic Messages wire protocol for Claude Code</td><td>AZ (plaintext key in <code>.env</code>)</td><td><span class="tag t-bad">keep separate</span> dev tool, not app code</td></tr>
+<tr><td>kamasutra <code>modal/flux_kontext_modal.py::Kontext.generate</code> — self-hosted FLUX fp8 on ComfyUI</td><td>Python+Modal</td><td>image-edit</td><td>ComfyUI graph control, GPU batching</td><td>MODAL</td><td><span class="tag t-dead">dead</span> 5-week-old sweep, never scheduled</td></tr>
+<tr><td><code>~/Projects/sora-tests</code> — <code>jobs.json</code> + mp4s from OpenAI Sora 2 <code>/v1/videos</code></td><td>ad-hoc curl</td><td>video</td><td>—</td><td>KEY (OpenAI)</td><td><span class="tag t-dead">dead</span> scratchpad, not a git repo</td></tr>
+<tr><td>route1views-next, route1views-submissions</td><td>PHP</td><td>—</td><td>—</td><td>—</td><td><span class="tag t-dead">dead</span> clones of the same remote/branch drift — not separate surfaces</td></tr>
+</table>
+
+<h3>Grep hits that are not surfaces</h3>
+<p>Eleven repos matched the sweep and contain <strong>no model call</strong>. Recording them so the
+next sweep does not re-investigate: <strong>cnxlocal</strong> (matched its own
+<code>scripts/verify-no-secrets.sh</code> pattern list), <strong>site-maintenance</strong> (MCP tool-name
+strings), <strong>pressiveweb</strong> (portfolio copy describing <em>profilo's</em> scanner),
+<strong>positioning</strong> (portfolio copy; <code>make_cards.py</code> is pure Pillow),
+<strong>anatomy-ref</strong> and <strong>hms-victory-explorer</strong> (both matched
+<code>.openai/hosting.json</code> — ChatGPT-Apps hosting config, model access delegated to the host
+runtime), <strong>startup-free-stack</strong> (docs only — but it is the register of which credit pays
+for what, so it needs updating when tiers move), <strong>mailpit-finder</strong>,
+<strong>route1views-creator</strong>, <strong>kboodle-app</strong> and
+<strong>remotecommons</strong> (skill markdown and the <code>expo@claude-plugins-official</code>
+dependency string), <strong>1981espressobarnetwork</strong> (zero hits in theme PHP/JS),
+<strong>og-worker</strong> (satori SVG → R2, no model), <strong>living-chart-media</strong> (asset
+bucket).</p>
+
+<h2>Router gaps, ranked by surfaces unblocked</h2>
+
+<p>Ranked by count. The right-hand column is what it costs, and the two are almost inversely
+correlated — which is the useful finding.</p>
+
+<table>
+<tr><th>#</th><th>Gap</th><th>Surfaces</th><th>Who</th><th>Size</th></tr>
+
+<tr><td class="num">1</td><td><strong>Vision — image input in <code>messages</code>, mapped per provider.</strong>
+Today <code>chatAttempt</code> stringifies non-string content for the Google step and passes it raw
+to Anthropic, so a vision call only succeeds if Azure happens to answer.</td>
+<td class="num"><strong>10</strong></td>
+<td>places-scout photo-analysis · media-factory azure_vision · living-chart auto_fit · familybook ×3 · route1views label_photos · video-gen qc + qa_review · profilo scan · social-brain-mcp brandkit</td>
+<td>~30 lines, per-provider content-block mapping</td></tr>
+
+<tr><td class="num">2</td><td><strong>Tool / function calling with tool-result rounds.</strong>
+A loop, not a field — the Worker has to hold state across turns or proxy it.</td>
+<td class="num"><strong>7</strong></td>
+<td>cnx-cinema reviewer (16 rounds) · video-gen scripting · social-brain-mcp voice_extractor + brandkit · family-brain ×2 · (cnx-bank-deals needs the server-side superset)</td>
+<td>substantial</td></tr>
+
+<tr><td class="num">3</td><td><strong><code>max_tokens</code> / <code>max_completion_tokens</code> in the body and in the PHP client.</strong>
+The router silently caps at 4000.</td>
+<td class="num"><strong>6</strong></td>
+<td>route1views content path (<code>setMaxTokens(8000)</code>) + EventDigest (160) · social-brain-mcp ×2 · places-scout extraction · profilo batch · media-factory</td>
+<td>trivial</td></tr>
+
+<tr><td class="num">4</td><td><strong>Image capability widening — per-call model slug, size, <code>n</code>, seed, steps, aspect, and multi-image input.</strong>
+<code>/v1/image {route, prompt, image_b64}</code> carries one image and no parameters; three call sites
+send up to six source photos as multipart.</td>
+<td class="num"><strong>6</strong></td>
+<td>social-brain-mcp fal · route1views FalAiService ×2 · r1v-image-worker · video-gen azure_gen + fal</td>
+<td>moderate; must not violate the <code>within-look-only</code> failover contract</td></tr>
+
+<tr><td class="num">5</td><td><strong><code>temperature</code> passthrough.</strong> Silently dropped today,
+which is worse than rejected — familybook asks for 0.1–0.2 deliberately.</td>
+<td class="num"><strong>5</strong></td>
+<td>familybook ×4 · thai ×4 · family-brain (escalating) · front-door fallback · helloplaydate gates</td>
+<td>one line in the body</td></tr>
+
+<tr><td class="num">6</td><td><strong><code>system</code> role handled correctly per provider.</strong>
+Survives Azure, is remapped to <code>user</code> for Google, and is passed through as an
+<em>invalid</em> role to Anthropic — so a system-prompt call fails whenever the chain falls to the tail.</td>
+<td class="num"><strong>4</strong></td>
+<td>route1views SpamScore · cnx-cinema reviewer · places-scout · social-brain-mcp</td>
+<td>~10 lines</td></tr>
+
+<tr><td class="num">7</td><td><strong>Per-call metadata object merged into <code>cf-aig-metadata</code></strong>
+alongside the token-derived <code>project</code>, with a privacy contract (no raw IP, no email, size-capped).</td>
+<td class="num"><strong>3</strong></td>
+<td>helloplaydate (per-user attribution — the whole ballgame) · social-brain-mcp per-client cost attribution · media-api</td>
+<td>small in the Worker; the contract is the work</td></tr>
+
+<tr><td class="num">8</td><td><strong>Embeddings usable from PHP and in batches</strong> — the endpoint
+exists but the bundled <code>LlmTiers.php</code> has no <code>embed()</code>, and the one caller sends 96 at a time.</td>
+<td class="num"><strong>1</strong></td>
+<td>route1views <code>embed_views.php</code></td>
+<td>small — plus the model/dims assertion from the fallback plan</td></tr>
+
+<tr><td class="num">9</td><td><strong><code>reasoning_effort</code> passthrough</strong> (gated to <code>gpt-5*</code>-shaped models) and a returned usage tuple.</td>
+<td class="num"><strong>1</strong> (6 scripts)</td>
+<td>living-chart <code>azure_client.py</code></td>
+<td>one field + a model-shape check</td></tr>
+
+<tr><td class="num">10</td><td><strong>A <code>moderation</code> capability.</strong> No tier, no route,
+no failover contract. The current caller fails open and silently stopped running for six days in August.</td>
+<td class="num"><strong>1</strong></td>
+<td>route1views <code>OpenAiModerationService</code></td>
+<td>a capability entry + one endpoint</td></tr>
+
+<tr><td class="num">11</td><td><strong><code>transcribe</code> capability and tier.</strong>
+Named in helloplaydate's own table, absent from KV entirely.</td>
+<td class="num"><strong>2</strong></td>
+<td>thai STT · helloplaydate</td>
+<td>a tier + binary audio upload</td></tr>
+
+<tr><td class="num">12</td><td><strong><code>gate</code> tier in KV</strong> — deliberately Anthropic-Haiku-first
+against an otherwise universal Azure-first policy.</td>
+<td class="num"><strong>1</strong></td>
+<td>helloplaydate</td>
+<td>a <code>tiers.json</code> edit + <code>sync.sh</code>, and a comment explaining the violation</td></tr>
+</table>
+
+<div class="verdict">
+<p><strong>Vision is the single highest-leverage gap.</strong> Ten surfaces across seven repos wait on
+roughly thirty lines of per-provider content mapping — more than tools, image params and temperature
+combined, at a fraction of the cost of tools. It is also the gap with the nastiest current failure
+mode: vision does not error today, it works <em>only when Azure answers</em>, which means every vision
+caller in the estate is silently pinned to a credit pool that expires around 21 September 2026.</p>
+</div>
+
+<h3>What is deliberately not a gap</h3>
+<ul>
+<li><strong>Video.</strong> <code>capabilities.video.failover</code> is <code>opt-in-only</code> —
+sora-2 → MiniMax is a permission escalation, not a quality ladder. video-gen's Modal path and
+sora-tests stay off the router by design, not by omission.</li>
+<li><strong>Speech / TTS.</strong> Four surfaces (video-gen ×3, media-factory) produce binary audio
+from SSML with callback events. Out of scope; nothing about them is a tier decision.</li>
+<li><strong>Image embeddings.</strong> familybook's open_clip and media-api's 512-d face vectors are
+local/RPC compute. The <code>embed</code> capability's <code>same-model-different-provider-only</code>
+contract makes routing them actively dangerous.</li>
+<li><strong>Self-hosted inference.</strong> kamasutra's FLUX-on-ComfyUI and video-gen's LTX/Wan run
+weights Kris owns on GPUs Kris rents. There is no provider to fail over to.</li>
+</ul>
+
+<h2>Phased sequence</h2>
+
+<table>
+<tr><th>Phase</th><th>What moves</th><th>Router work first</th><th>Surfaces</th></tr>
+
+<tr><td><strong>0 · now</strong><br>no router change</td>
+<td>route1views canary (4 call sites, not 3) — <em>plus</em> <code>classify_views.py</code> and
+<code>name_clusters.py</code>, which are pure duplicate ladders in the same repo. Retiring them in
+the canary week is the estate's cheapest deletion and its most persuasive proof.</td>
+<td>PHP client gains <code>json_mode</code> + <code>max_completion_tokens</code> (migration-plan step 1);
+make <code>/health</code> tell the truth (fallback-plan step 1)</td><td class="num">3</td></tr>
+
+<tr><td><strong>1 · the free batch</strong><br>~40 lines total</td>
+<td>Nothing migrates. Ship <code>temperature</code>, <code>max_tokens</code>, <code>system</code>-role
+mapping and <code>reasoning_effort</code> together — four trivial fields that between them unblock
+sixteen surfaces. Doing them as one commit is the highest ratio in the document.</td>
+<td>gaps 3, 5, 6, 9</td><td class="num">—</td></tr>
+
+<tr><td><strong>2 · the Python fleet</strong></td>
+<td><code>aigw.py</code> wave A (migration-plan step 2) — og-studio, front-door, 3 living-chart
+scripts, <code>build_pin_spec.py</code> — and now also <strong>wave A′</strong>: familybook
+<code>nlquery.py</code>, thai's chat providers, and the retirement of living-chart's
+<code>azure_client.py</code>, all unblocked by phase 1.</td>
+<td>phase 1; client fallback chain (fallback-plan step 3)</td><td class="num">10</td></tr>
+
+<tr><td><strong>3 · the non-Python fleet</strong></td>
+<td>cnx-cinema <code>tmdb.js</code> (planned step 4), places-scout <code>claude-extraction.js</code>,
+profilo <code>batch.py</code>, social-brain-mcp chat, route1views <code>embed_views.php</code>. Three
+independent re-implementations of "Anthropic through CF unified billing" collapse into one call here.</td>
+<td>gap 8 (PHP <code>embed()</code>); JS fallback demotion (fallback-plan step 5)</td><td class="num">5</td></tr>
+
+<tr><td><strong>4 · vision</strong><br>the big unlock</td>
+<td>places-scout photo-analysis, media-factory, living-chart <code>auto_fit</code>, familybook ×3,
+route1views <code>label_photos</code>, video-gen qc + qa_review, profilo scan.</td>
+<td>gap 1 — per-provider image-block mapping</td><td class="num">10</td></tr>
+
+<tr><td><strong>5 · image</strong></td>
+<td>r1v-image-worker <strong>first</strong> — it is blocked but has never been deployed, so it is the
+only image surface where bending to the router costs nothing in rollback risk. Then social-brain-mcp
+fal, route1views FalAiService ×2, video-gen's two image paths.</td>
+<td>gap 4, without violating <code>within-look-only</code>; pin the model once per batch, never per item</td><td class="num">6</td></tr>
+
+<tr><td><strong>6 · tools</strong></td>
+<td>cnx-cinema reviewer (planned step 5), video-gen scripting, social-brain-mcp voice_extractor +
+brandkit, family-brain ×2. A 16-round loop behind an HTTP boundary is a rewrite; do not fold it into
+any earlier phase.</td>
+<td>gap 2</td><td class="num">7</td></tr>
+
+<tr><td><strong>7 · the credit cliff</strong><br>~21 Sep 2026</td>
+<td>Re-open helloplaydate <em>only</em> if per-call metadata, <code>gate</code>, <code>transcribe</code>,
+temperature, system and vision have all shipped — and only after the calibrated gate thresholds have
+been re-measured against whatever leads the chain. That is four prerequisites, one of which is a
+measurement campaign. Also the moment to revisit every AZ-billed row in the inventory.</td>
+<td>gaps 7, 11, 12</td><td class="num">1 + transcribe</td></tr>
+</table>
+
+<div class="card">
+<p><strong>The sequencing rule that matters more than the order.</strong> The fallback plan's finding
+holds for all fifty new surfaces: <em>do not delete the existing path when you wire the router
+in front of it — demote it.</em> Every one of these call sites already contains a working,
+router-independent route to a model. Doing this now costs one <code>try/except</code> per client;
+doing it after migration costs rewriting code that was deleted.</p>
+</div>
+
+<h2>Target end state</h2>
+
+<div class="mermaid">
+flowchart TB
+  SRC["tiers.json in git"] -->|"sync.sh"| KV[("Workers KV")]
+  KV --> W["llm-tiers Worker<br/>chat · embed · image<br/>+ vision · tools · params"]
+
+  subgraph MIG["MIGRATED — 17 surfaces, 12 repos"]
+    direction LR
+    M1["PHP · route1views<br/>LlmService + embed_views"]
+    M2["Python · aigw fleet<br/>og-studio · front-door<br/>living-chart · familybook"]
+    M3["Node · cnx-cinema tmdb<br/>places-scout extraction"]
+    M4["Python · profilo · thai<br/>social-brain-mcp"]
+  end
+
+  subgraph BLK["BLOCKED — 25 surfaces, unblocked by gaps 1-6"]
+    direction LR
+    B1["vision ×10"]
+    B2["tools ×7"]
+    B3["image params ×6"]
+    B4["moderation · transcribe"]
+  end
+
+  subgraph SEP["KEEP SEPARATE — 13 surfaces"]
+    direction LR
+    S1["kboodle<br/>CLIENT's own CF account"]
+    S2["helloplaydate<br/>per-USER attribution"]
+    S3["cnx-bank-deals<br/>server-side web_search"]
+    S4["self-hosted<br/>Modal GPU · open_clip"]
+    S5["speech · Google Vision<br/>gooser · ducker"]
+  end
+
+  MIG --> W
+  BLK -.->|"after gaps ship"| W
+  W --> GW["CF AI Gateway<br/>holds every provider key"]
+  GW --> AZ["Azure — credits to ~21 Sep 2026"]
+  GW --> GG["Google free tier"]
+  GW --> AN["Anthropic — CF unified billing"]
+  GW --> FA["fal.ai — BYOK"]
+
+  S1 --> CGW["CLIENT's own gateway"]
+  S2 --> GW
+  S3 --> GW
+  S4 --> MOD["Modal GPU / local MPS"]
+  S5 --> OTH["Google Cloud · VPS containers"]
+
+  style W fill:#e8eaff,stroke:#1f2be0,stroke-width:2px
+  style KV fill:#e4f3ea,stroke:#1f7a4d
+  style MIG fill:#e4f3ea,stroke:#1f7a4d
+  style BLK fill:#fbf0dd,stroke:#a86400
+  style SEP fill:#f3f4f8,stroke:#6b7280
+  style S1 fill:#fbe6e4,stroke:#a8322a
+</div>
+
+<p>Two properties of that picture are worth stating out loud. First, <strong>the router never becomes
+the only path</strong> — the KEEP SEPARATE column is thirteen surfaces wide and is meant to stay that
+way, because each of them is separate for a reason that does not expire. Second,
+<strong>everything Kris pays for that is not on the router today is billed to Azure credits with a
+September expiry</strong>: living-chart's direct client, video-gen's image path, media-factory,
+familybook, and every vision caller in the estate by accident. The credit cliff is not a
+helloplaydate deadline. It is an estate-wide one, and this inventory is the list of what has to be
+repointed when it arrives.</p>
+
+<div class="foot">
+<p>Swept 8 August 2026 across <code>~/Projects</code> (32 repos) and <code>~/Sites</code> (13 installs),
+excluding <code>node_modules</code>, <code>venv</code>, <code>vendor</code>, <code>dist</code>,
+lockfiles and minified bundles. 61 surfaces classified by reading call sites, not filenames; 14
+grep-matching repos confirmed as containing no model call. Liveness judged by
+<code>git log -1 --format=%cr</code> plus whether anything imports, schedules or deploys the code.</p>
+<p>Companions: <a href="migration-plan.html">migration-plan.html</a> (the four planned consumers,
+per-app cutover and rollback) · <a href="fallback-plan.html">fallback-plan.html</a> (what happens
+when the Worker is down) · <a href="architecture-2026-08-08.html">architecture-2026-08-08.html</a>
+(why the router exists). Source of truth:
+<code>~/Projects/ai-gateway-tiers/tiers.json</code> · Router:
+<code>~/Projects/llm-tiers-worker</code>.</p>
+<p>No code was changed and nothing was committed in producing this map.</p>
+</div>
+
+</main>
+<script>mermaid.initialize({ startOnLoad:true, theme:'neutral', flowchart:{ useMaxWidth:true } });</script>
+</body>
+</html>

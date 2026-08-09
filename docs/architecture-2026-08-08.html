@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The tier system — architecture review, 8 Aug 2026</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root { --ink:#16181d; --mid:#5a6272; --line:#dfe3ea; --bg:#fbfbfc;
+          --good:#1f7a4d; --warn:#a86400; --bad:#a8322a; --accent:#1f2be0; }
+  * { box-sizing:border-box }
+  body { margin:0; padding:48px 24px 96px; background:var(--bg); color:var(--ink);
+         font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  main { max-width:920px; margin:0 auto }
+  h1 { font-size:34px; line-height:1.15; letter-spacing:-.02em; margin:0 0 6px }
+  .sub { color:var(--mid); font-size:15px; margin:0 0 40px }
+  h2 { font-size:24px; letter-spacing:-.01em; margin:52px 0 14px; padding-top:22px; border-top:1px solid var(--line) }
+  h3 { font-size:17px; margin:28px 0 8px }
+  p, li { color:#23262d }
+  code { font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; background:#eef0f4;
+         padding:1px 5px; border-radius:4px; }
+  pre { background:#16181d; color:#e8eaf0; padding:16px 18px; border-radius:8px; overflow-x:auto;
+        font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  pre code { background:none; padding:0; color:inherit }
+  table { border-collapse:collapse; width:100%; margin:18px 0; font-size:14.5px }
+  th,td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top }
+  th { font-size:12px; text-transform:uppercase; letter-spacing:.07em; color:var(--mid); font-weight:600 }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:20px 24px; margin:22px 0 }
+  .mermaid { background:#fff; border:1px solid var(--line); border-radius:10px; padding:22px; margin:22px 0; text-align:center }
+  .tag { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+         padding:2px 8px; border-radius:99px; vertical-align:2px }
+  .t-good { background:#e4f3ea; color:var(--good) } .t-warn { background:#fbf0dd; color:var(--warn) }
+  .t-bad  { background:#fbe6e4; color:var(--bad) }
+  .lede { font-size:18px; line-height:1.6; color:#2c3038 }
+  .verdict { border-left:3px solid var(--accent); padding-left:18px; margin:26px 0 }
+  ul { padding-left:22px } li { margin:5px 0 }
+  .foot { margin-top:64px; padding-top:20px; border-top:1px solid var(--line); color:var(--mid); font-size:13px }
+</style>
+</head>
+<body>
+<main>
+
+<h1>The tier system</h1>
+<p class="sub">Architecture review — 8 August 2026 · is it maximally versatile, and is it elegant?</p>
+
+<p class="lede">Apps should never name a model. They should name a <em>job</em> — and something else
+should decide which model does it. That's the whole idea. Everything below is about how close we
+actually are to it.</p>
+
+<h2>Explain it like I'm five</h2>
+
+<div class="card">
+<p><strong>You don't order a specific chef. You order a <em>kind of meal</em>.</strong></p>
+<p>An app says "this is <strong>bulk</strong> work" or "this is <strong>hard</strong> work" — and never
+says <em>gpt-5.6-luna</em>. A dispatcher looks up who's on duty for that kind of work, sends the job to
+the first cook, and if that cook is busy, passes it to the next one down the list. The app never
+finds out, and never needs changing when the roster changes.</p>
+<p>The list of who's on duty lives in <strong>one place</strong>. Change it there and every app in the
+world obeys the next second — no code edits, no deploys.</p>
+</div>
+
+<h2>Where we started, and why it hurt</h2>
+
+<p>Until today the tier list was <em>bundled into the code</em>. That's fine with one consumer. We have
+four, in three languages, so the same table got copied four ways and drifted:</p>
+
+<div class="mermaid">
+flowchart TB
+  subgraph BEFORE["BEFORE — the table is copied into every app"]
+    direction TB
+    T1["tiers.json<br/>(source of truth)"]
+    P1["Python client<br/>reads bundled copy"]
+    P2["cnx-cinema<br/>hand-copied tiers.json"]
+    P3["helloplaydate<br/>re-implemented in Python"]
+    P4["kboodle + route1views (PHP)<br/>NO tier system —<br/>gpt-4o-mini hardcoded"]
+    T1 -->|pip install| P1
+    T1 -.->|manual copy| P2
+    T1 -.->|manual re-type| P3
+    T1 -.->|never arrived| P4
+    P1 --> GW1["CF AI Gateway<br/>chain sent by the CLIENT"]
+    P2 --> GW1
+    P3 --> GW1
+  end
+  style P4 fill:#fbe6e4,stroke:#a8322a
+  style P2 fill:#fbf0dd,stroke:#a86400
+  style P3 fill:#fbf0dd,stroke:#a86400
+</div>
+
+<p>Three symptoms, all real and all found today:</p>
+<ul>
+  <li>A one-line policy change meant editing <strong>three</strong> files in three repos.</li>
+  <li>The two PHP apps could never participate at all — the client is Python — so they pinned
+      models by hand and rotted. <code>gpt-4o-mini</code> is a 2024 model.</li>
+  <li>Nothing enforced agreement. Drift was silent.</li>
+</ul>
+
+<h2>What we built today</h2>
+
+<p>A tiny Cloudflare Worker that does the tier→chain expansion <em>server-side</em>. Apps stop knowing
+about models entirely:</p>
+
+<div class="mermaid">
+flowchart TB
+  SRC["tiers.json in git<br/>(source of truth)"]
+  SRC -->|"sync.sh — no deploy"| KV[("Workers KV<br/>live tier table")]
+  KV --> W["llm-tiers Worker<br/>expands tier → provider chain"]
+
+  A1["PHP · kboodle"] --> W
+  A2["PHP · route1views"] --> W
+  A3["JS · cnx-cinema"] --> W
+  A4["Python · any app"] --> W
+  A5["Claude Code · /offload"] --> W
+
+  W --> GW["CF AI Gateway<br/>holds provider keys · does failover"]
+  GW --> AZ["Azure — luna, terra, sol,<br/>DeepSeek, Kimi"]
+  GW --> GG["Google free tier"]
+  GW --> AN["Anthropic (paid)"]
+
+  style W fill:#e8eaff,stroke:#1f2be0,stroke-width:2px
+  style KV fill:#e4f3ea,stroke:#1f7a4d
+</div>
+
+<p>The request an app makes is now the entire interface:</p>
+
+<pre><code>POST /v1/chat
+{ "tier": "bulk", "messages": [ … ], "project": "kboodle" }
+
+→ { "text": "…", "model": "gpt-5.6-luna-2026-07-09", "ms": 941 }</code></pre>
+
+<p><strong>No model id. No provider. No API key.</strong> Any language that can POST JSON is a
+first-class citizen — which is what finally lets the PHP apps in.</p>
+
+<h3>What a failover actually looks like</h3>
+
+<div class="mermaid">
+sequenceDiagram
+  participant App as kboodle (PHP)
+  participant W as llm-tiers Worker
+  participant KV as KV
+  participant GW as CF AI Gateway
+  App->>W: {tier:"bulk", messages}
+  W->>KV: read tier table
+  KV-->>W: luna → flash → flash-dz → kimi → terra
+  W->>GW: [5 attempts, in order]
+  GW->>GW: luna → 429 quota
+  GW->>GW: flash → OK
+  GW-->>W: answer (+ which model won)
+  W-->>App: {text, model:"DeepSeek-V4-Flash"}
+</div>
+
+<h2>So — is it maximally versatile?</h2>
+
+<p><strong>Much more than this morning. Not maximal.</strong> Text is solved for every language. Three
+whole capabilities still bypass the router entirely:</p>
+
+<table>
+  <tr><th>Capability</th><th>Routed?</th><th>Where it lives now</th></tr>
+  <tr><td>Text chat</td><td><span class="tag t-good">yes</span></td><td><code>/v1/chat</code>, all 4 tiers</td></tr>
+  <tr><td>JSON / structured output</td><td><span class="tag t-good">yes</span></td><td><code>json_schema</code> passthrough</td></tr>
+  <tr><td>Embeddings</td><td><span class="tag t-bad">no</span></td><td><code>embed</code> tier exists in the table but the Worker has no endpoint for it</td></tr>
+  <tr><td>Images</td><td><span class="tag t-bad">no</span></td><td>direct to <code>gpt-image-1.5</code> / FLUX</td></tr>
+  <tr><td>Video</td><td><span class="tag t-bad">no</span></td><td>direct to <code>sora-2</code>; H3 on Modal</td></tr>
+  <tr><td>Streaming</td><td><span class="tag t-bad">no</span></td><td>not supported — blocks any chat UI</td></tr>
+  <tr><td>Vision (image input)</td><td><span class="tag t-warn">untested</span></td><td>messages pass through, so it may already work</td></tr>
+</table>
+
+<h2>Is it elegant?</h2>
+
+<p>Elegant in shape, <strong>not yet elegant in fact</strong> — because we now have <em>two</em>
+implementations of the same idea running side by side:</p>
+
+<div class="mermaid">
+flowchart LR
+  SRC["tiers.json"] -->|"pip install (bundled)"| PY["Python client<br/>expands chain locally"]
+  SRC -->|"sync.sh (manual)"| KVX[("KV")] --> WX["Worker<br/>expands chain remotely"]
+  PY --> GWX["CF AI Gateway"]
+  WX --> GWX
+  style PY fill:#fbf0dd,stroke:#a86400
+</div>
+
+<p>That's the main blemish. Two code paths that must agree, plus a <strong>manual sync step</strong>
+between git and KV — which is exactly the class of problem this project set out to delete.</p>
+
+<h3>The honest defect list</h3>
+
+<table>
+  <tr><th>#</th><th>Issue</th><th>Severity</th></tr>
+  <tr><td>1</td><td><strong>No client fallback.</strong> If the Worker is down, every app that uses it is down. Each client needs a hardcoded chain to fall back to.</td><td><span class="tag t-bad">must fix</span></td></tr>
+  <tr><td>2</td><td><strong>Manual git→KV sync.</strong> <code>sync.sh</code> is a human step, so git and live can silently disagree. Should run on push.</td><td><span class="tag t-warn">should fix</span></td></tr>
+  <tr><td>3</td><td><strong>Two implementations.</strong> Python client and Worker both expand chains. Retire the client's local path and make it a thin HTTP wrapper.</td><td><span class="tag t-warn">should fix</span></td></tr>
+  <tr><td>4</td><td><strong>One shared token</strong> for all apps — can't revoke or rate-limit a single app, and can't attribute spend by key.</td><td><span class="tag t-warn">should fix</span></td></tr>
+  <tr><td>5</td><td><strong>No <code>embed</code> endpoint</strong>, though the tier exists in the table. Half-kept promise.</td><td><span class="tag t-warn">gap</span></td></tr>
+  <tr><td>6</td><td><strong>No streaming.</strong> Any user-facing chat UI must bypass the router.</td><td><span class="tag t-warn">gap</span></td></tr>
+  <tr><td>7</td><td><strong>Nothing migrated yet.</strong> All four apps still run the old way; the Worker has no production traffic.</td><td><span class="tag t-warn">pending</span></td></tr>
+</table>
+
+<h2>Cruft audit</h2>
+
+<p>Two kinds: things that are <em>already</em> stale, and things that <em>become</em> dead weight the
+moment the Worker is adopted.</p>
+
+<h3>Already rotten — fix regardless of what we adopt</h3>
+
+<table>
+  <tr><th>Where</th><th>What</th><th>Why it matters</th></tr>
+  <tr>
+    <td><code>tiers.json</code> → <code>_measured</code></td>
+    <td>Says <em>"gpt-5.4 beat every gpt-5.6 variant on both axes, which is why <code>high</code>
+        still leads with it"</em> and lists <em>DeepSeek-V4-Flash 1.2s</em>.</td>
+    <td><span class="tag t-bad">dangerous</span> Both claims are now false. <code>high</code> no
+        longer leads with gpt-5.4, and today's real-task benchmark measured V4-Flash at
+        <strong>12.4s</strong>, not 1.2s. Stated as <em>measured fact</em>, so it will be trusted.</td>
+  </tr>
+  <tr>
+    <td><code>tiers.json</code> → <code>_deployment_capacity</code></td>
+    <td>Lists V4-Pro at 1000 and omits <code>DeepSeek-V4-Flash-dz</code> and <code>sora-2</code>.</td>
+    <td><span class="tag t-warn">stale</span> Describes an estate that no longer exists.</td>
+  </tr>
+  <tr>
+    <td><code>README.md</code> line 54</td>
+    <td>Reasons about <code>Kimi-K2.7-Code</code> and gives V4-Pro a capacity of 500.</td>
+    <td><span class="tag t-warn">stale</span> K2.7-Code was replaced by <code>FW-Kimi-K3</code>; V4-Pro is dropped.</td>
+  </tr>
+  <tr>
+    <td><code>scripts/probe_text.py</code></td>
+    <td>Still probes <code>DeepSeek-V4-Pro</code>.</td>
+    <td><span class="tag t-warn">stale</span> Benchmarks a model no chain uses.</td>
+  </tr>
+  <tr>
+    <td><code>profiles</code> + <code>_ordered()</code> + <code>profile=</code> arg</td>
+    <td>A whole reordering feature. <strong>Zero callers</strong> across every project.</td>
+    <td><span class="tag t-warn">dead</span> Never used since it was written. Delete it.</td>
+  </tr>
+  <tr>
+    <td>kboodle · route1views (PHP)</td>
+    <td><code>gpt-4o-mini</code>, <code>gpt-5.4-nano</code>, <code>gpt-5</code>, <code>claude-opus-5</code> hardcoded.</td>
+    <td><span class="tag t-bad">rotten</span> Outside every tier system. <code>gpt-4o-mini</code> is a 2024 model.</td>
+  </tr>
+</table>
+
+<h3>Becomes cruft the moment we adopt the Worker</h3>
+
+<div class="mermaid">
+flowchart TB
+  subgraph KEEP["KEEP"]
+    K1["tiers.json — source of truth"]
+    K2["llm-tiers Worker"]
+    K3["CF AI Gateway"]
+    K4["thin HTTP clients<br/>(Python / PHP / JS)"]
+  end
+  subgraph DROP["DELETE ONCE MIGRATED"]
+    D1["aigw.py chain expansion<br/>build_chain · _element · _endpoint<br/>~150 of 357 lines"]
+    D2["cnx-cinema/services/tiers.json<br/>(whole copied file)"]
+    D3["helloplaydate TIERS table<br/>+ its own wire code"]
+    D4["profiles / _ordered<br/>(already unused)"]
+    D5["chain tables restated in<br/>README + 2 skill docs"]
+  end
+  style DROP fill:#fbe6e4,stroke:#a8322a
+  style KEEP fill:#e4f3ea,stroke:#1f7a4d
+</div>
+
+<ul>
+  <li><strong>~150 of 357 lines of <code>aigw.py</code></strong> — everything that builds a provider
+      chain locally. The client shrinks to "POST tier + messages, return text".</li>
+  <li><strong>cnx-cinema's copied <code>tiers.json</code></strong> — deleted outright, not synced.
+      This was the whole reason it existed.</li>
+  <li><strong>helloplaydate's re-implementation.</strong> Its documented justification was per-user
+      spend attribution via its own gateway — the Worker now forwards <code>project</code> into
+      <code>cf-aig-metadata</code>, so <em>that reason has expired</em>. Worth re-deciding rather than
+      assuming; its <code>gate</code> tier is genuinely bespoke and calibrated.</li>
+  <li><strong>Chain tables restated in three prose docs</strong> (README, <code>using-llms</code>,
+      <code>offload</code>). Once KV is authoritative these are copies that can only drift — they
+      should say <em>"ask <code>/v1/tiers</code>"</em> instead of listing models.</li>
+  <li><strong>The <code>offload</code>→<code>bulk</code> deprecation shim</strong> — harmless now,
+      but it is cruft on a timer. Give it a removal date.</li>
+</ul>
+
+<div class="card">
+<p><strong>The pattern worth noticing:</strong> almost every item here is a <em>copy of the truth
+rather than the truth</em> — a duplicated table, a restated chain, a cached measurement. That is the
+same disease the Worker cures, so adopting it and then leaving these in place would be the worst
+outcome: one more copy, not one fewer.</p>
+</div>
+
+<h2>Verdict</h2>
+
+<div class="verdict">
+<p><strong>Versatility: strong, with three named holes.</strong> The language barrier — the thing that
+actually broke the system — is gone. Embeddings, images/video and streaming remain outside.</p>
+<p><strong>Elegance: the design is right, the implementation is halfway.</strong> One dispatcher, one
+table, dumb clients is the correct shape. But two chain-expanders and a manual sync are precisely
+the duplication the project exists to remove. It isn't elegant until the Python client stops
+expanding chains and KV updates itself from git.</p>
+</div>
+
+<h3>The shortest path to "yes" on both</h3>
+<ol>
+  <li><strong>Fallback chain in every client</strong> — removes the single point of failure. Nothing else should ship first.</li>
+  <li><strong>Auto-sync KV from git</strong> — a GitHub Action on push to <code>tiers.json</code>. Deletes defect #2 permanently.</li>
+  <li><strong>Make the Python client a thin wrapper</strong> over <code>/v1/chat</code> — collapses two implementations into one.</li>
+  <li><strong>Add <code>/v1/embed</code></strong> — closes the one gap where a tier is promised but not delivered.</li>
+  <li><strong>Per-app tokens</strong> in KV — real attribution and revocation.</li>
+  <li>Streaming and image/video routing only if a real product needs them. Don't build on spec.</li>
+</ol>
+
+<p class="foot">
+  Worker: <code>~/Projects/llm-tiers-worker</code> · <code>https://llm-tiers.kristifer-szabo.workers.dev</code><br>
+  Source of truth: <code>~/Projects/ai-gateway-tiers/tiers.json</code> · push live with <code>./sync.sh</code><br>
+  Verified 8 Aug 2026: all four tiers answered; a KV edit changed routing with no deploy; PHP client round-tripped in 1.28s.
+</p>
+
+</main>
+<script>
+  mermaid.initialize({ startOnLoad:true, theme:'base', themeVariables:{
+    fontFamily:'-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif', fontSize:'14px',
+    primaryColor:'#f4f6fa', primaryTextColor:'#16181d', primaryBorderColor:'#c8cfdb',
+    lineColor:'#8b93a3', tertiaryColor:'#fff' }});
+</script>
+</body>
+</html>
