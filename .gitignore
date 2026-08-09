@@ -4,3 +4,5 @@ __pycache__/
 .venv/
 .env
 .tmp/
+# Local wrangler state — caches the Cloudflare account id/name for this machine.
+.wrangler/
