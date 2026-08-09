@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Assert the Google project behind every stored AI Studio key cannot be billed.
 
-The `client` profile leads with Google on the premise that its key is free. That
+Every chain's Google tail — and the client sites' Google-FIRST dynamic routes —
+assume that key is free. That
 premise is not a property of the key — it is a property of the key's Google Cloud
 project, and it flips the instant a billing account is attached to that project
 for ANY reason, including an unrelated API like Maps or Places. Google emits no
@@ -69,7 +70,7 @@ def main() -> int:
     if state:
         print(f"  {RED}FAIL{OFF} {project} HAS BILLING ENABLED — "
               f"every google-ai-studio call is charged at vendor list price.")
-        print(f"  {DIM}     The `client` profile assumes this project is free. "
+        print(f"  {DIM}     The Google tail assumes this project is free. "
               f"Either detach billing, or move the stored key to an unbilled "
               f"project and update tiers.json.{OFF}")
         return 1

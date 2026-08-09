@@ -27,7 +27,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 
 import httpx  # noqa: E402
 
-from aigw import PROFILES, TIERS, build_chain, chat, embed  # noqa: E402
+from aigw import (  # noqa: E402
+    POLICIES, ROUTES, TIERS, build_chain, build_route_element, chat, embed,
+)
 from verify_free_tier import main as verify_free_tier  # noqa: E402
 
 PROJECT = "selftest"
@@ -42,6 +44,21 @@ def _tiny_jpeg() -> str | None:
     buf = io.BytesIO()
     Image.new("RGB", (64, 64), (200, 30, 30)).save(buf, "JPEG")
     return base64.b64encode(buf.getvalue()).decode()
+
+
+def _model_of(element: dict) -> str:
+    """The model an already-built chain element will call.
+
+    Azure carries it in the endpoint path; every other provider puts it in the
+    body, so read whichever is present.
+    """
+    q = element.get("query") or {}
+    if q.get("model"):                       # anthropic / groq / cerebras
+        return str(q["model"])
+    ep = element["endpoint"]
+    if "models/" in ep:                      # google: v1beta/models/<model>:generateContent
+        return ep.split("models/", 1)[1].split(":", 1)[0]
+    return ep.split("/")[1]                  # azure: <resource>/<model>/<path>?...
 
 
 def _who_answered(limit: int = 25) -> dict[str, str]:
@@ -72,7 +89,7 @@ def main() -> int:
 
     for tier in wanted:
         if tier == "embed":
-            continue
+            continue  # a route, exercised below
         t0 = time.time()
         try:
             out = chat(tier, "Reply with exactly one word: pong", project=PROJECT)
@@ -103,7 +120,9 @@ def main() -> int:
                 failures += 1
                 print(f"  {RED}FAIL{OFF} vision     {str(e)[:120]}")
 
-    if "embed" in wanted:
+    # `embed` is no longer in TIERS, so it is not in the default `wanted` list —
+    # run it unless the caller named specific tiers and left it out.
+    if not sys.argv[1:] or "embed" in wanted:
         try:
             v = embed("hello world", project=PROJECT)
             assert len(v) == 1536, f"expected 1536 dims, got {len(v)}"
@@ -112,35 +131,54 @@ def main() -> int:
             failures += 1
             print(f"  {RED}FAIL{OFF} embed      {str(e)[:120]}")
 
-    # The `client` profile is what production client sites call. It inverts the
-    # Azure-first order to lead with the Google free tier, so it exercises a
-    # different first step than everything above and fails independently.
-    if "low" in wanted and "client" in PROFILES:
-        order = [s["provider"] for s in TIERS["low"]["chain"]]
-        got = [
-            "google-ai-studio" if "generateContent" in e["endpoint"] else e["provider"]
-            for e in build_chain("low", "x", profile="client")
-        ]
-        if got[0] != "google-ai-studio":
+    # `policy` reorders a tier's chain and may NEVER change which models it can
+    # use. Check both halves — the reorder happened, and the set is identical —
+    # then prove an unknown name RAISES rather than being quietly ignored.
+    if "high" in wanted:
+        base = [s["model"] for s in TIERS["high"]["chain"]]
+        got = [_model_of(e) for e in build_chain("high", "x", policy="best")]
+        want_lead = TIERS["high"]["policy_order"]["best"][0]
+        if got[0] != want_lead:
             failures += 1
-            print(f"  {RED}FAIL{OFF} profile    client did not lead with Google: {got}")
-        elif sorted(got) != sorted(order):
+            print(f"  {RED}FAIL{OFF} policy     best did not lead with {want_lead}: {got}")
+        elif sorted(got) != sorted(base):
             failures += 1
-            print(f"  {RED}FAIL{OFF} profile    client changed the model set: "
-                  f"{sorted(order)} -> {sorted(got)}")
+            print(f"  {RED}FAIL{OFF} policy     best changed the model set: "
+                  f"{sorted(base)} -> {sorted(got)}")
         else:
             try:
                 t0 = time.time()
-                out = chat("low", "Reply with exactly one word: pong",
-                           project=PROJECT, profile="client")
-                print(f"  {GREEN}ok{OFF}   profile    client {time.time()-t0:5.1f}s  "
+                out = chat("high", "Reply with exactly one word: pong",
+                           project=PROJECT, policy="best")
+                print(f"  {GREEN}ok{OFF}   policy     best {time.time()-t0:5.1f}s  "
                       f"{out.strip()[:20]!r}  {DIM}(reorder only, same models){OFF}")
             except Exception as e:
                 failures += 1
-                print(f"  {RED}FAIL{OFF} profile    client {str(e)[:110]}")
+                print(f"  {RED}FAIL{OFF} policy     best {str(e)[:110]}")
 
-    # The `client` profile's whole premise is that Google cannot bill us.
-    # Check it rather than trust it.
+        try:
+            build_chain("high", "x", policy="nonsense")
+            failures += 1
+            print(f"  {RED}FAIL{OFF} policy     unknown name was accepted silently")
+        except KeyError:
+            print(f"  {GREEN}ok{OFF}   policy     unknown name raises  {DIM}(known: "
+                  f"{', '.join(POLICIES)}){OFF}")
+
+    # `embed` is a ROUTE: one model, no chain. Prove the shape, not just the call
+    # — a second model here poisons every index silently.
+    try:
+        el = build_route_element("embed", embed_input="x")
+        assert "embed" not in TIERS, "embed is back in the tiers table"
+        assert ROUTES["embed"].get("chain") is None, "the embed route grew a chain"
+        assert "embeddings" in el["endpoint"], el["endpoint"]
+        print(f"  {GREEN}ok{OFF}   route      embed pins "
+              f"{ROUTES['embed']['model']}  {DIM}(no chain){OFF}")
+    except Exception as e:
+        failures += 1
+        print(f"  {RED}FAIL{OFF} route      embed {str(e)[:120]}")
+
+    # The Google tail's whole premise is that Google cannot bill us. Check it
+    # rather than trust it.
     if verify_free_tier() != 0:
         failures += 1
 
