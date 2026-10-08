@@ -1,9 +1,8 @@
 """Cloudflare AI Gateway client — ask for a tier, never a model.
 
 Every call goes to the `tiers` gateway's universal endpoint, which takes an
-ordered array of provider attempts and returns the first that succeeds. Azure
-leads every tier because its credits are free; each tier falls back to a second
-Azure model before it will consider anything that costs money.
+ordered array of provider attempts and returns the first that succeeds. The
+provider order is declared in `tiers.json`; unsupported providers are rejected.
 
 No provider API key is ever sent. Provider keys live in the gateway's secret
 store, so the only credential here is the gateway token.
@@ -75,10 +74,6 @@ POLICIES: dict[str, Any] = _named("policies")
 _RETIRED_TIERS: dict[str, str] = {
     k: v for k, v in (_SPEC.get("_retired_tiers") or {}).items() if not k.startswith("_")
 }
-# The Azure resource name is deployment-specific, so it comes from the
-# environment rather than the spec — nothing account-shaped lives in git.
-_RESOURCE: str = os.environ.get("AZURE_RESOURCE", "")
-_API_VERSION: str = _SPEC["azure_api_version"]
 
 # DEPRECATED TIER NAMES, accepted for one release so an out-of-tree caller
 # (or a `*_LLM_TIER` env var set in some deployed config) doesn't hard-fail on
@@ -176,8 +171,7 @@ def _openai_msgs(prompt: str, images: list[str]) -> list[dict[str, Any]]:
 
 
 def _rejects_temperature(model: str) -> bool:
-    """Models that 400 on `temperature`. Azure gpt-5.x and Anthropic's sonnet/opus
-    reasoning models reject it; DeepSeek, Kimi and Gemini accept it."""
+    """Models whose APIs reject the optional temperature parameter."""
     m = (model or "").lower()
     return m.startswith("gpt-5") or "sonnet" in m or "opus" in m
 
@@ -197,35 +191,6 @@ def _element(
     only form that survives failover between providers with different formats.
     """
     provider, model = step["provider"], step["model"]
-
-    if provider == "azure-openai":
-        res = resource or _RESOURCE
-        if not res:
-            raise TierError(
-                "AZURE_RESOURCE is not set — it names your Azure AI Foundry resource "
-                "and every Azure step in a chain needs it. Pass resource=... if your "
-                "settings loader doesn't populate os.environ."
-            )
-        path = step.get("path", "chat/completions")
-        if path == "embeddings":
-            body: dict[str, Any] = {"input": embed_input}
-        else:
-            body = {"messages": _openai_msgs(prompt, images)}
-            if json_mode:
-                body["response_format"] = {"type": "json_object"}
-            # gpt-5.x REJECTS `temperature` (400 Unsupported parameter). Sent
-            # unconditionally it does not error visibly — the gateway just moves
-            # to the next link, so the caller silently gets a DIFFERENT MODEL.
-            # That is precisely the stealth swap the tier system exists to
-            # prevent, so only send it to models known to accept it.
-            if temperature is not None and not _rejects_temperature(model):
-                body["temperature"] = temperature
-        return {
-            "provider": provider,
-            "endpoint": f"{res}/{model}/{path}?api-version={_API_VERSION}",
-            "headers": {"Content-Type": "application/json"},
-            "query": body,
-        }
 
     if provider == "google-ai-studio":
         parts: list[dict[str, Any]] = [{"text": prompt}]
@@ -256,8 +221,7 @@ def _element(
             }
             for b in images
         ]
-        # Anthropic requires an explicit cap. It is the last resort and does not
-        # fire while Azure credits hold.
+        # Anthropic requires an explicit cap.
         body = {"model": model, "max_tokens": 4096, "messages": [{"role": "user", "content": content}]}
         if temperature is not None:
             body["temperature"] = temperature
@@ -343,7 +307,7 @@ def build_route_element(
             f"{CAPABILITIES.get(spec.get('capability', ''), {}).get('failover', 'unspecified')!r}."
         )
     step = {
-        "provider": spec.get("provider", "azure-openai"),
+        "provider": spec["provider"],
         "model": spec["model"],
         **({"path": spec["path"]} if spec.get("path") else {}),
     }
@@ -353,7 +317,7 @@ def build_route_element(
 def _extract_text(payload: Any) -> str:
     """Normalise whichever provider answered into plain text."""
     if isinstance(payload, dict):
-        if "choices" in payload:  # azure / openai / groq / cerebras
+        if "choices" in payload:  # OpenAI-shaped providers
             return payload["choices"][0]["message"]["content"] or ""
         if "candidates" in payload:  # google
             return "".join(
