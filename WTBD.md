@@ -21,9 +21,7 @@ on helloplaydate costs ~80x everything the tails spend combined. The tail is the
 today; helloplaydate's Sonnet usage is the right one.
 
 **Two things change that calculus:**
-1. route1views' tail numbers predate today's Azure insertion, which should cut tail firing
    sharply. Needs re-measuring before drawing conclusions.
-2. **Azure credits expire ~2026-09-21.** After that the chain becomes Gemini free → Azure PAID →
    Anthropic PAID, and the tail's price stops being academic. tiers.json already names
    DeepSeek-V4-Flash (~$0.14/$0.28 per 1M) and gpt-5.6-luna (~$0.20/$1.20) as the candidates.
 
@@ -61,13 +59,11 @@ probably wrong endpoint/model ids rather than genuine unavailability, so they ne
 
 ## Tasks
 
-- [ ] A. Re-measure the tail now that Azure sits in every chain — 30-day Anthropic spend and fire
       rate per gateway. Establishes whether the tail is a problem at all.
 - [x] B. Investigate helloplaydate's `claude-sonnet-5` workload — **ANSWERED by an existing audit**;
       see Progress. Supersedes several tasks below.
 - [ ] C. Fix the endpoint/model ids for `workers-ai` and `cerebras`, then benchmark viable tail
       candidates against the REAL workload (spam-score JSON reliability + latency, not "say pong").
-      **Constraint discovered: Azure DeepSeek-V4 has tool calling DISABLED and is text-only**, so it
       cannot serve tool-using or vision work — it is only a candidate for plain text tails.
 - [~] J. **IN PROGRESS (6/7 — all RUNTIME sites complete)** — port helloplaydate's call sites to named tiers
       (`face_check.py`, `character_bible.py` ×2, `likeness_gate.py`, `vision_meta.py`,
@@ -99,14 +95,11 @@ plan, so past the 10k neurons/day allowance it bills rather than stops.
 
 **Embedding dims — no drop-in.** All 7 embedding models measured: bge-m3 1024, qwen3 1024,
 plamo 2048, bge-small 384, bge-base 768, embeddinggemma 768, bge-large 1024. **None is 1536**,
-which is what the `embed` tier (Azure text-embedding-3-small) produces and what
 premade_search's embeddings.npy stores. Switching = re-embedding the corpus. Worth planning
-BEFORE Azure credits expire ~2026-09-21, after which embeddings start costing money.
 
 **gpt-oss-120b capability tests:**
 - structured JSON via `response_format: json_schema` — SUPPORTED, parses strictly.
 - tool calling — **SUPPORTED**, proper OpenAI-shaped `tool_calls` with correct args. Notable: the
-  helloplaydate digest audit kept Sonnet because Azure's DeepSeek has tool calling DISABLED. This
   does not, so it is a live candidate there.
 - **BUT unreliable for structured extraction: 1/3 runs succeeded.** It is a REASONING model —
   spent 232 completion tokens on a two-field extraction, and when reasoning exhausts the budget it
@@ -169,7 +162,6 @@ When 3.1-flash-lite is eventually deprecated it is a ONE-LINE change in
 path exists, is free under quota, and carries newer models — at a latency cost.
 
 ### 2026-08-05 — kboodle SEVERED from Kris's resources (client owns its stack)
-Decision: the client now pays for all of kboodle's AI, so none of Kris's free credits (Azure or
 Google free tier) should touch it, and the tier/free-tier machinery is not worth the complexity
 for a site spending ~1.5 cents/day.
 
@@ -177,8 +169,6 @@ for a site spending ~1.5 cents/day.
 BYOK Google key. Local wp-config points at Bob's account too. So nothing needed changing on the
 client side; what was wrong was yesterday's leftovers in KRIS's account.
 
-Deleted from Kris's account: `kboodle_google-ai-studio_default`, **`kboodle_azure-openai_default`
-(this held KRIS's Azure key — the actual free-credit leak)**, `kboodle_fal_default`, and the `low`
 dynamic route. Deleted the Gemini API key from the `kboodle` Google project.
 Result: kboodle's footprint in Kris's account is NONE; the kboodle Google project is unbilled with
 zero keys.
@@ -211,7 +201,6 @@ CF_AIG creds: `helloplaydate-api`, `helloplaydate-cron` (gateway `helloplaydate`
 (gateway `profilo`). Nothing else touches the gateway.
 - `helloplaydate-api`: tier call from inside prod returns 'pong'.
 - `profilo-api`: **this is the gateway I rewrote today** (linked store_id via full-object PUT, added
-  google+azure secrets, created a dynamic route). Called it from inside its own container — returns
   'pong'. The PUT did not drop a field.
 
 **Local tier-client consumers** `og-studio` and `familybook` import `aigw` directly (NOT vendored),
@@ -441,7 +430,6 @@ Tested the live systems rather than inspecting code. Five findings, two of them 
 **1. kboodle production is on BOB'S Cloudflare account — my kboodle work had ZERO effect.**
 Production `wp-config.php` sets `KBOODLE_CF_AI_GATEWAY_ACCOUNT_ID = 1e10432c85f1e8d9866094cfd24f1777`,
 which is `Bobrohinsky@gmail.com's Account`, not Kris's. Everything I did to the `kboodle` gateway
-(BYOK google secret, azure secret, dynamic route) was applied to the gateway of the SAME NAME in
 Kris's account, which production never calls. Worse: Bob's gateway has NO google-ai-studio secret
 at all — only `fal` — so its Gemini calls run on **Cloudflare unified billing** against Bob's
 account (`cost=2e-06`, `cached=False`, real token counts). kboodle production has never been on a
@@ -450,7 +438,6 @@ free tier. Production DOES work (verified live: returns "pong").
 **2. route1views production does NOT use the dynamic route, so task M does not protect it.**
 Production wp-config: `R1V_LLM_PROVIDER=google-ai-studio`, `R1V_LLM_MODEL=gemini-3.1-flash-lite` —
 NOT `compat` / `dynamic/low` as the LOCAL wp-config has. Production calls Gemini directly with NO
-fallback. The Azure step I added to the `low` route is real but unreached. Production DOES work
 (verified through its own LlmService via wp-cli: 1.66s, correct answer) and my key swap did not
 break it, since it uses `route1views_google-ai-studio_default`, which I repointed.
 
@@ -477,7 +464,6 @@ call, against the behaviour that matters rather than a smoke test:
 
 | Site | Tier | Live verification |
 |---|---|---|
-| `face_check` | low | real verdict 4.6s; served by azure-openai/gpt-5.6-luna |
 | `premade_search.break_story` | low | 4 correctly-personalised scenes, 5.4s |
 | `character_bible` (coarse) | low | — |
 | `character_bible` (bible) | **high** | deep-brown/black-haired subject read back "Black", "medium-deep brown skin" — no lightening |
@@ -494,7 +480,6 @@ into a raised exception mid-promotion — breaking the module's documented fail-
 Widened to `Exception`.
 
 Only hardcoded `claude-` ids left under `app/`: `settings.analytics_digest_model` (correct — the
-audit says KEEP; tool-calling agent, and Azure's DeepSeek has tool calling disabled) and
 `vision_meta.MODEL`.
 
 **Remaining: `vision_meta` — needs a decision, not a swap.** OFFLINE ingest tooling, no runtime
@@ -502,7 +487,6 @@ callers, but two scripts import its API by name: `scripts/_vision_sweep.py` and
 `scripts/vision_pass.py` both do `from app.services.vision_meta import MODEL, ...`, and
 `vision_pass` also imports `usage_cost_usd`. The tier client does not expose token usage, so
 porting makes `_usage` zeros and `usage_cost_usd` meaningless — arguably CORRECT once the call is
-free on Azure credits, but it silently changes what those scripts report. Three files plus a
 reporting-semantics change; flagged rather than assumed.
 
 ### 2026-08-04 — Task J in progress (2 of 7 sites)
@@ -514,7 +498,6 @@ LLM-cost commits there would tangle unrelated history. His main tree is untouche
 **Done and verified LIVE (not just mocked):**
 1. `face_check.py` — the highest-volume site (every photo upload, 4 routers). Now `chat("low",
    images=[...], json_mode=True)`. Live vision call returned a real verdict in 4.6s and the
-   gateway log confirms `azure-openai / gpt-5.6-luna`, project `helloplaydate/face_check` — i.e.
    the FREE first step. Net -70 lines.
 2. `premade_search.break_story` — text-only, async, now `achat("low", json_mode=True)`. Live call
    produced 4 correctly-personalised scenes in 5.4s.
@@ -522,7 +505,6 @@ LLM-cost commits there would tangle unrelated history. His main tree is untouche
 **Gotchas worth carrying to the remaining sites:**
 - The tier client has NO `system` parameter (a system prompt is not portable across a chain), so
   fold the framing into the prompt.
-- `json_mode` maps to `response_format: json_object` on the Azure steps, which REJECTS a top-level
   array. Ask for `{"scenes": [...]}` and unwrap.
 - These sites all used the helloplaydate gateway; the tier client uses the `tiers` gateway. Pass
   `project="helloplaydate/<site>"` so per-site spend stays attributable.
@@ -546,7 +528,6 @@ tool. It runs **once per day**. The 27-32k prompts are the agent loop accumulati
 across turns, not one huge prompt. ~$8/mo.
 
 **Why it cannot move to DeepSeek** — the audit's central finding, and it directly constrains this
-plan: **Azure's DeepSeek-V4 deployments have tool calling DISABLED**, and V4 is **text-only**. So
 DeepSeek cannot serve tool-using OR vision workloads at all. That kills the naive "swap Anthropic
 for DeepSeek" move for anything but plain text.
 
@@ -556,7 +537,6 @@ while `outline_reviewer.py` and `planner/ai.py` next door correctly name a tier:
 - `character_bible.py` — **claude-sonnet-5** vision, run `BIBLE_SAMPLES` times per child.
 - plus `likeness_gate.py`, `vision_meta.py`, `storybook/narrative.py`, `premade_search.py`.
 
-Correct target is the `low` tier (Azure gpt-5.6-luna -> gpt-5.4, both vision-capable, free on MS
 credits). `premade_search.py` is text-only and could go to `offload` today.
 
 **Consequence for this plan:** the digest stays on Sonnet (verdict upheld), and the tail swap drops
